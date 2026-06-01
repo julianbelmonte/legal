@@ -1,0 +1,46 @@
+"""Deploy-time configuration for the legal pipeline.
+
+A single, env-driven settings object that controls proxy and captcha provider
+selection and related deploy toggles. Env prefix is ``LEGAL_``.
+
+This module holds **non-secret** selection flags only. Secrets (API keys and
+credentials) live in ``legal/secret.py`` / the environment and are resolved
+elsewhere. Keep this module import-light: no network or heavy imports at import
+time.
+"""
+
+from __future__ import annotations
+
+import functools
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    """Non-secret deploy configuration, read from the environment.
+
+    All fields have sensible defaults so the offline tier needs no env.
+    """
+
+    model_config = SettingsConfigDict(env_prefix="LEGAL_", extra="ignore")
+
+    proxy_enabled: bool = False
+    proxy_provider: str = "none"  # "none" | "floxy"
+    proxy_country: str = "us"
+    captcha_provider: str = "capsolver"
+    botbrowser_profile: str | None = None  # pin a specific .enc by name
+
+
+@functools.lru_cache(maxsize=1)
+def get_settings() -> Settings:
+    """Return the cached settings instance."""
+    return Settings()
+
+
+def reload_settings() -> Settings:
+    """Clear the settings cache and return a freshly-loaded instance.
+
+    Tests use this to apply monkeypatched environment variables.
+    """
+    get_settings.cache_clear()
+    return get_settings()
