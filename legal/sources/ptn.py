@@ -23,7 +23,7 @@ from legal.sources import SourceAdapter, register_adapter
 
 
 SOURCE_ID = "ptn"
-SOURCE_MAP = "apps/legal/docs/ptn_dictamenes.md"
+SOURCE_MAP = "legal/docs/ptn_dictamenes.md"
 
 API_BASE_URL = "https://api.ptn.gob.ar"
 HUMAN_URL = "https://busquedadictamenes.ptn.gob.ar/"

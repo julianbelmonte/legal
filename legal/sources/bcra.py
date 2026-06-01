@@ -23,7 +23,7 @@ from legal.sources import SourceAdapter, register_adapter
 
 
 SOURCE_ID = "bcra"
-SOURCE_MAP = "apps/legal/docs/bcra_normativa.md"
+SOURCE_MAP = "legal/docs/bcra_normativa.md"
 HUMAN_URL = "https://www.bcra.gob.ar/buscador/"
 PUBLIC_BASE_URL = "https://www.bcra.gob.ar"
 API_BASE_URL = "https://svc-index.bcra.gob.ar"

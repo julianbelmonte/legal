@@ -22,7 +22,7 @@ from legal.sources import SourceAdapter, register_adapter
 
 
 SOURCE_ID = "bo-pba"
-SOURCE_MAP = "apps/legal/docs/boletin_oficial_pba.md"
+SOURCE_MAP = "legal/docs/boletin_oficial_pba.md"
 
 BASE_URL = "https://boletinoficial.gba.gob.ar"
 SEARCH_URL = f"{BASE_URL}/buscar"

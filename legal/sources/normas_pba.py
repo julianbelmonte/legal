@@ -32,7 +32,7 @@ from legal.sources import SourceAdapter, register_adapter
 
 
 SOURCE_ID = "normas-pba"
-SOURCE_MAP = "apps/legal/docs/normas_pba.md"
+SOURCE_MAP = "legal/docs/normas_pba.md"
 
 BASE_URL = "https://normas.gba.gob.ar"
 HOME_URL = f"{BASE_URL}/"

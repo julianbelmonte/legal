@@ -17,7 +17,7 @@ from legal.sources import SourceAdapter, register_adapter
 
 
 SOURCE_ID = "csjn"
-SOURCE_MAP = "apps/legal/docs/csjn_jurisprudencia.md"
+SOURCE_MAP = "legal/docs/csjn_jurisprudencia.md"
 
 BASE = "https://sjconsulta.csjn.gov.ar"
 SJ_CONTEXT = BASE + "/sjconsulta"

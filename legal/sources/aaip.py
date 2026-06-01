@@ -25,7 +25,7 @@ from legal.sources import SourceAdapter, register_adapter
 
 
 SOURCE_ID = "aaip"
-SOURCE_MAP = "apps/legal/docs/aaip_disposiciones.md"
+SOURCE_MAP = "legal/docs/aaip_disposiciones.md"
 HUMAN_URL = "https://www.argentina.gob.ar/aaip/buscador-normativa"
 SHEET_URL = (
     "https://sheets.googleapis.com/v4/spreadsheets/"

@@ -25,7 +25,7 @@ from legal.sources import SourceAdapter, register_adapter
 
 
 SOURCE_ID = "pjn-juris"
-SOURCE_MAP = "apps/legal/docs/pjn_jurisprudencia.md"
+SOURCE_MAP = "legal/docs/pjn_jurisprudencia.md"
 
 API_BASE_URL = "https://pjn-documento-api.pjn.gov.ar"
 HUMAN_URL = "https://www.pjn.gov.ar/jurisprudencia2/consulta.php"

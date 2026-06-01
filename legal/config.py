@@ -53,7 +53,7 @@ def capsolver_api_key() -> str:
     if value is None:
         raise RuntimeError(
             "Capsolver API key is not configured. Set LEGAL_CAPSOLVER_API_KEY "
-            "or run apps/legal/scripts/bootstrap.py to create apps/legal/local_config.py."
+            "or run legal/scripts/bootstrap.py to create legal/local_config.py."
         )
     return str(value)
 
@@ -76,7 +76,7 @@ def botbrowser_bin() -> Path:
     if path is None:
         raise RuntimeError(
             "BotBrowser Chromium executable was not found. Run "
-            "apps/legal/scripts/bootstrap.py or set LEGAL_BOTBROWSER_BIN."
+            "legal/scripts/bootstrap.py or set LEGAL_BOTBROWSER_BIN."
         )
     return path
 
@@ -99,7 +99,7 @@ def botbrowser_profiles_dir() -> Path:
     if path is None:
         raise RuntimeError(
             "BotBrowser profiles directory was not found. Run "
-            "apps/legal/scripts/bootstrap.py or set LEGAL_BOTBROWSER_PROFILES_DIR."
+            "legal/scripts/bootstrap.py or set LEGAL_BOTBROWSER_PROFILES_DIR."
         )
     return path
 
@@ -112,7 +112,7 @@ def pick_profile() -> Path:
     if not profiles:
         raise RuntimeError(
             f"No BotBrowser .enc profiles found in {profiles_dir}. Run "
-            "apps/legal/scripts/bootstrap.py or set LEGAL_BOTBROWSER_PROFILES_DIR."
+            "legal/scripts/bootstrap.py or set LEGAL_BOTBROWSER_PROFILES_DIR."
         )
     return profiles[0]
 

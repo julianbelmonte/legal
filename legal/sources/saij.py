@@ -23,7 +23,7 @@ from legal.sources import SourceAdapter, register_adapter
 
 
 SOURCE_ID = "saij"
-SOURCE_MAP = "apps/legal/docs/saij_jurisprudencia.md"
+SOURCE_MAP = "legal/docs/saij_jurisprudencia.md"
 PUBLIC_BASE_URL = "https://www.saij.gob.ar"
 HUMAN_URL = f"{PUBLIC_BASE_URL}/"
 SEARCH_URL = f"{PUBLIC_BASE_URL}/busqueda"

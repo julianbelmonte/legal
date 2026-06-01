@@ -21,7 +21,7 @@ from legal.sources import pjn_juris, tfn
 
 
 SOURCE_ID = "cnacaf"
-SOURCE_MAP = "apps/legal/docs/cnacaf_jurisprudencia.md"
+SOURCE_MAP = "legal/docs/cnacaf_jurisprudencia.md"
 
 HUMAN_URL = "https://jurisprudenciatfn.mecon.gob.ar/"
 API_BASE_URL = tfn.API_BASE_URL

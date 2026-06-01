@@ -37,7 +37,7 @@ from legal.sources import SourceAdapter, register_adapter
 
 
 SOURCE_ID = "sentencias-scba"
-SOURCE_MAP = "apps/legal/docs/sentencias_scba.md"
+SOURCE_MAP = "legal/docs/sentencias_scba.md"
 
 BASE_URL = "https://sentencias.scba.gov.ar"
 HUMAN_URL = f"{BASE_URL}/"

@@ -71,7 +71,7 @@ def cmd_sources(args: argparse.Namespace) -> int:
             operation="sources",
             query={},
             items=[],
-            provenance=Provenance(source_map="apps/legal/registry.py"),
+            provenance=Provenance(source_map="legal/registry.py"),
         ).to_dict()
         | {"items": list_sources()},
         pretty=args.pretty,
@@ -86,7 +86,7 @@ def cmd_schema(args: argparse.Namespace) -> int:
         document_type="json_schema",
         content_type="application/schema+json",
         metadata={"schema": LEGAL_RESPONSE_SCHEMA},
-        provenance=Provenance(source_map="apps/legal/schema.py"),
+        provenance=Provenance(source_map="legal/schema.py"),
     )
     emit_json(
         LegalResponse.document_response(
@@ -219,7 +219,7 @@ def cmd_global_search(args: argparse.Namespace) -> int:
     provenance = Provenance(
         source_urls=source_urls,
         fetched_urls=fetched_urls,
-        source_map="apps/legal/registry.py",
+        source_map="legal/registry.py",
         raw={"sources": source_results},
     )
     if success_count == 0:

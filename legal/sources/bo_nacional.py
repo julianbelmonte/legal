@@ -37,7 +37,7 @@ from legal.sources import SourceAdapter, register_adapter
 
 
 SOURCE_ID = "bo-nacional"
-SOURCE_MAP = "apps/legal/docs/boletin_oficial_nacional.md"
+SOURCE_MAP = "legal/docs/boletin_oficial_nacional.md"
 
 BASE_URL = "https://www.boletinoficial.gob.ar"
 SEED_URL = f"{BASE_URL}/busquedaAvanzada/all"

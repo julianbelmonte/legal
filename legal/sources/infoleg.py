@@ -33,7 +33,7 @@ from legal.sources import SourceAdapter, register_adapter
 
 
 SOURCE_ID = "infoleg"
-SOURCE_MAP = "apps/legal/docs/infoleg_normas_nacionales.md"
+SOURCE_MAP = "legal/docs/infoleg_normas_nacionales.md"
 
 BASE_URL = "https://servicios.infoleg.gob.ar"
 HOME_URL = f"{BASE_URL}/infolegInternet/"

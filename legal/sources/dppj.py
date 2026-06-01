@@ -32,7 +32,7 @@ from legal.sources import normas_pba
 
 
 SOURCE_ID = "dppj"
-SOURCE_MAP = "apps/legal/docs/dppj_resoluciones.md"
+SOURCE_MAP = "legal/docs/dppj_resoluciones.md"
 
 BASE_URL = "https://www.gba.gob.ar"
 LEGISLACION_URL = f"{BASE_URL}/dppj/legislacion"

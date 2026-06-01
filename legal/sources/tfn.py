@@ -23,7 +23,7 @@ from legal.sources import SourceAdapter, register_adapter
 
 
 SOURCE_ID = "tfn"
-SOURCE_MAP = "apps/legal/docs/tfn_jurisprudencia.md"
+SOURCE_MAP = "legal/docs/tfn_jurisprudencia.md"
 
 HUMAN_URL = "https://jurisprudenciatfn.mecon.gob.ar/"
 API_BASE_URL = "https://api.jurisprudencia-tfn.ar"

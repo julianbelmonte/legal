@@ -17,7 +17,7 @@ from legal.sources import SourceAdapter, register_adapter
 
 
 SOURCE_ID = "pjn-expedientes"
-SOURCE_MAP = "apps/legal/docs/pjn_expedientes.md"
+SOURCE_MAP = "legal/docs/pjn_expedientes.md"
 
 HOME_URL = "https://scw.pjn.gov.ar/scw/home.seam"
 CAPTCHA_FRAME_NAME = "captcha-frame"

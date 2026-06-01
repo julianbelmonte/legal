@@ -33,7 +33,7 @@ from legal.sources import saij
 
 
 SOURCE_ID = "igj"
-SOURCE_MAP = "apps/legal/docs/igj_resoluciones.md"
+SOURCE_MAP = "legal/docs/igj_resoluciones.md"
 
 ARGENTINA_BASE_URL = "https://www.argentina.gob.ar"
 MARCO_NORMATIVO_URL = f"{ARGENTINA_BASE_URL}/justicia/igj/institucional/marco-normativo"

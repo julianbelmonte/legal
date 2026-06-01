@@ -32,7 +32,7 @@ from legal.sources import SourceAdapter, register_adapter
 
 
 SOURCE_ID = "jusbaires"
-SOURCE_MAP = "apps/legal/docs/jusbaires_jurisprudencia.md"
+SOURCE_MAP = "legal/docs/jusbaires_jurisprudencia.md"
 
 BASE_URL = "https://juristeca.jusbaires.gob.ar"
 HUMAN_URL = f"{BASE_URL}/"

@@ -30,7 +30,7 @@ from legal.sources import SourceAdapter, register_adapter
 
 
 SOURCE_ID = "juba"
-SOURCE_MAP = "apps/legal/docs/juba_scba.md"
+SOURCE_MAP = "legal/docs/juba_scba.md"
 
 BASE_URL = "https://juba.scba.gov.ar"
 SEARCH_URL = f"{BASE_URL}/Buscar.aspx"
