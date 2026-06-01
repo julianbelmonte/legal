@@ -56,6 +56,13 @@ class BotBrowser:
                 },
                 **enc,
             }
+
+            from legal.providers import proxy as _proxy
+
+            proxy_pw = _proxy.resolve_proxy_for_playwright()
+            if proxy_pw is not None:
+                merged.setdefault("configs", {})["proxy"] = dict(proxy_pw)
+
             merged_path = session_dir / "profile-merged.json"
             merged_path.write_text(json.dumps(merged))
 
@@ -64,24 +71,28 @@ class BotBrowser:
                 self._xvfb, disp = _start_xvfb()
                 env = {**os.environ, "DISPLAY": f":{disp}"}
 
-            self.ctx = self._pw.chromium.launch_persistent_context(
-                user_data_dir=str(session_dir),
-                executable_path=config.botbrowser_bin(),
-                headless=False,
-                env=env,
-                ignore_default_args=[
+            launch_kwargs: dict[str, Any] = {
+                "user_data_dir": str(session_dir),
+                "executable_path": config.botbrowser_bin(),
+                "headless": False,
+                "env": env,
+                "ignore_default_args": [
                     "--disable-crash-reporter",
                     "--disable-crashpad-for-testing",
                     "--disable-gpu-watchdog",
                 ],
-                args=[
+                "args": [
                     "--disable-blink-features=AutomationControlled",
                     f"--bot-profile={merged_path}",
                     "--no-first-run",
                     "--disable-default-apps",
                     "--disable-audio-output",
                 ],
-            )
+            }
+            if proxy_pw is not None:
+                launch_kwargs["proxy"] = proxy_pw
+
+            self.ctx = self._pw.chromium.launch_persistent_context(**launch_kwargs)
             self.page = self.ctx.pages[0] if self.ctx.pages else self.ctx.new_page()
             self.page.add_init_script(_BINDINGS_CLEANUP)
             return self
