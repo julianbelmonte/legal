@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import random
 from pathlib import Path
 from typing import Any
 
@@ -159,7 +160,14 @@ def botbrowser_profiles_dir() -> Path:
 
 
 def pick_profile() -> Path:
-    """Return a deterministic BotBrowser .enc profile path."""
+    """Return a BotBrowser .enc profile path.
+
+    Rotates randomly across all available ``*.enc`` profiles. If
+    ``settings.botbrowser_profile`` (env ``LEGAL_BOTBROWSER_PROFILE``) is set,
+    the matching profile is pinned for reproducible runs.
+    """
+
+    from legal import settings as _settings
 
     profiles_dir = botbrowser_profiles_dir()
     profiles = sorted(profiles_dir.glob("*.enc"))
@@ -168,7 +176,20 @@ def pick_profile() -> Path:
             f"No BotBrowser .enc profiles found in {profiles_dir}. Run "
             "legal/scripts/bootstrap.py or set LEGAL_BOTBROWSER_PROFILES_DIR."
         )
-    return profiles[0]
+
+    pinned = _non_empty(_settings.get_settings().botbrowser_profile)
+    if pinned is not None:
+        for profile in profiles:
+            if profile.name == pinned or profile.stem == pinned:
+                return profile
+        available = ", ".join(p.name for p in profiles)
+        raise RuntimeError(
+            f"Pinned BotBrowser profile {pinned!r} "
+            f"(LEGAL_BOTBROWSER_PROFILE) was not found in {profiles_dir}. "
+            f"Available profiles: {available}."
+        )
+
+    return random.choice(profiles)
 
 
 __all__ = [
