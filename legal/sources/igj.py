@@ -117,11 +117,23 @@ def add_scrape_official_page_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--year", type=_year, help="optional year to include in normalized records")
 
 
+def _cursor_context(cursor_payload: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Return the query context a prior page stored under the cursor's ``raw``.
+
+    Pagination cursors carry the operation's query context (e.g. ``year``,
+    ``url``) nested under ``raw`` (see ``_official_page_response``). Reading it
+    from the top level always misses it, which breaks ``--cursor`` pagination.
+    """
+    raw = cursor_payload.get("raw") if cursor_payload else None
+    return raw if isinstance(raw, Mapping) else {}
+
+
 def handle_list(args: argparse.Namespace) -> LegalResponse:
     cursor_payload = _decode_cursor(args.cursor, operation="list")
-    if cursor_payload.get("year") is None and args.year is None:
+    cursor_year = _cursor_context(cursor_payload).get("year")
+    if cursor_year is None and args.year is None:
         raise usage_error("--year is required")
-    year = int(cursor_payload.get("year") or args.year)
+    year = int(cursor_year if cursor_year is not None else args.year)
     page_url = official_year_url(year)
 
     with _make_client() as client:
@@ -201,10 +213,12 @@ def handle_get_infoleg(args: argparse.Namespace) -> LegalResponse:
 
 def handle_scrape_official_page(args: argparse.Namespace) -> LegalResponse:
     cursor_payload = _decode_cursor(args.cursor, operation="scrape-official-page")
-    if cursor_payload.get("url") is None and not args.url:
+    cursor_ctx = _cursor_context(cursor_payload)
+    cursor_url = cursor_ctx.get("url")
+    if cursor_url is None and not args.url:
         raise usage_error("--url is required")
-    page_url = str(cursor_payload.get("url") or args.url)
-    year = cursor_payload.get("year") if cursor_payload else args.year
+    page_url = str(cursor_url or args.url)
+    year = cursor_ctx.get("year") if cursor_ctx.get("year") is not None else args.year
     normalized_year = int(year) if year is not None else None
 
     with _make_client() as client:
