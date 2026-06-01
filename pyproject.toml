@@ -1,0 +1,30 @@
+[project]
+name = "legal"
+version = "0.1.0"
+requires-python = ">=3.13"
+dependencies = [
+    "httpx",
+    "playwright",
+    "pypdf",
+    "fastapi",
+    "uvicorn[standard]",
+    "pydantic",
+    "pydantic-settings",
+]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[project.scripts]
+legal = "legal.__main__:main"
+
+[tool.setuptools]
+packages = ["legal", "api"]
+
+[tool.pytest.ini_options]
+markers = ["live: hits real external sources; gated behind LEGAL_LIVE=1"]
+testpaths = ["tests"]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"

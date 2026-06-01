@@ -1,1 +1,9 @@
-.clew
+.clew/
+.venv/
+__pycache__/
+*.pyc
+.work/
+legal/secret.py
+legal/local_config.py
+.pytest_cache/
+*.egg-info/
