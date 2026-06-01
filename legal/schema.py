@@ -9,7 +9,7 @@ LEGAL_RESPONSE_SCHEMA: dict[str, Any] = {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "$id": "https://webcam.local/schemas/legal-cli-response.schema.json",
     "title": "Legal CLI agent response",
-    "description": "Uniform machine-readable response emitted by apps.legal.cli.",
+    "description": "Uniform machine-readable response emitted by legal.cli.",
     "oneOf": [
         {"$ref": "#/$defs/success_response"},
         {"$ref": "#/$defs/error_response"},

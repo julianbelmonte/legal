@@ -14,11 +14,11 @@ from urllib.parse import parse_qs, urlparse
 
 import httpx
 
-from apps.legal.errors import LegalCliError, not_found, parse_error, usage_error
-from apps.legal.http import LegalHttpClient
-from apps.legal.models import JsonDict, LegalDocument, LegalItem, LegalResponse, Provenance
-from apps.legal.pagination import build_page_info, decode_cursor
-from apps.legal.parsing import (
+from legal.errors import LegalCliError, not_found, parse_error, usage_error
+from legal.http import LegalHttpClient
+from legal.models import JsonDict, LegalDocument, LegalItem, LegalResponse, Provenance
+from legal.pagination import build_page_info, decode_cursor
+from legal.parsing import (
     HtmlNode,
     absolute_url,
     classify_link,
@@ -26,9 +26,9 @@ from apps.legal.parsing import (
     clean_text,
     parse_html,
 )
-from apps.legal.registry import get_source
-from apps.legal.sources import SourceAdapter, register_adapter
-from apps.legal.sources import normas_pba
+from legal.registry import get_source
+from legal.sources import SourceAdapter, register_adapter
+from legal.sources import normas_pba
 
 
 SOURCE_ID = "dppj"

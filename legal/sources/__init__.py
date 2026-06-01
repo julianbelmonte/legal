@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from typing import NoReturn
 
-from apps.legal.errors import LegalCliError
-from apps.legal.models import SourceInfo, UnsupportedOperation
-from apps.legal.registry import SOURCE_BY_ID
-from apps.legal.sources.base import SourceAdapter, SourceOperation
+from legal.errors import LegalCliError
+from legal.models import SourceInfo, UnsupportedOperation
+from legal.registry import SOURCE_BY_ID
+from legal.sources.base import SourceAdapter, SourceOperation
 
 
 def _protected_operation(source: SourceInfo, operation: str) -> UnsupportedOperation | None:
@@ -88,24 +88,24 @@ __all__ = [
 
 
 def _register_builtin_adapters() -> None:
-    from apps.legal.sources import aaip as _aaip  # noqa: F401
-    from apps.legal.sources import bcra as _bcra  # noqa: F401
-    from apps.legal.sources import bo_nacional as _bo_nacional  # noqa: F401
-    from apps.legal.sources import bo_pba as _bo_pba  # noqa: F401
-    from apps.legal.sources import cnacaf as _cnacaf  # noqa: F401
-    from apps.legal.sources import csjn as _csjn  # noqa: F401
-    from apps.legal.sources import dppj as _dppj  # noqa: F401
-    from apps.legal.sources import igj as _igj  # noqa: F401
-    from apps.legal.sources import infoleg as _infoleg  # noqa: F401
-    from apps.legal.sources import juba as _juba  # noqa: F401
-    from apps.legal.sources import jusbaires as _jusbaires  # noqa: F401
-    from apps.legal.sources import normas_pba as _normas_pba  # noqa: F401
-    from apps.legal.sources import pjn_expedientes as _pjn_exp  # noqa: F401
-    from apps.legal.sources import pjn_juris as _pjn_juris  # noqa: F401
-    from apps.legal.sources import ptn as _ptn  # noqa: F401
-    from apps.legal.sources import saij as _saij  # noqa: F401
-    from apps.legal.sources import sentencias_scba as _sentencias_scba  # noqa: F401
-    from apps.legal.sources import tfn as _tfn  # noqa: F401
+    from legal.sources import aaip as _aaip  # noqa: F401
+    from legal.sources import bcra as _bcra  # noqa: F401
+    from legal.sources import bo_nacional as _bo_nacional  # noqa: F401
+    from legal.sources import bo_pba as _bo_pba  # noqa: F401
+    from legal.sources import cnacaf as _cnacaf  # noqa: F401
+    from legal.sources import csjn as _csjn  # noqa: F401
+    from legal.sources import dppj as _dppj  # noqa: F401
+    from legal.sources import igj as _igj  # noqa: F401
+    from legal.sources import infoleg as _infoleg  # noqa: F401
+    from legal.sources import juba as _juba  # noqa: F401
+    from legal.sources import jusbaires as _jusbaires  # noqa: F401
+    from legal.sources import normas_pba as _normas_pba  # noqa: F401
+    from legal.sources import pjn_expedientes as _pjn_exp  # noqa: F401
+    from legal.sources import pjn_juris as _pjn_juris  # noqa: F401
+    from legal.sources import ptn as _ptn  # noqa: F401
+    from legal.sources import saij as _saij  # noqa: F401
+    from legal.sources import sentencias_scba as _sentencias_scba  # noqa: F401
+    from legal.sources import tfn as _tfn  # noqa: F401
 
 
 _register_builtin_adapters()

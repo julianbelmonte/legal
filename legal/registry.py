@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from apps.legal.models import SourceInfo, UnsupportedOperation
+from legal.models import SourceInfo, UnsupportedOperation
 
 
 CAPTCHA_SOLVER_CAPABILITY = "captcha_solver"
@@ -144,7 +144,7 @@ def list_sources() -> list[dict]:
     # but lacking a concrete adapter handler are reported under
     # `unsupported_operations` instead of being advertised as working, so callers
     # don't burn a call on an operation that only returns `unsupported_operation`.
-    from apps.legal.sources import get_adapter
+    from legal.sources import get_adapter
 
     payloads = []
     for source in SOURCES:

@@ -13,7 +13,7 @@ from typing import Any
 
 from playwright.sync_api import sync_playwright
 
-from apps.legal import config
+from legal import config
 
 
 _BINDINGS_CLEANUP = (

@@ -17,13 +17,13 @@ from typing import Any
 
 import httpx
 
-from apps.legal import enrichment
-from apps.legal.captcha import CaptchaError, solve_recaptcha_v3
-from apps.legal.errors import CAPTCHA_SOLVER_CAPABILITY, LegalCliError, parse_error, usage_error
-from apps.legal.http import LegalHttpClient
-from apps.legal.models import JsonDict, LegalDocument, LegalItem, LegalResponse, PageInfo, Provenance
-from apps.legal.pagination import decode_cursor, make_cursor
-from apps.legal.parsing import (
+from legal import enrichment
+from legal.captcha import CaptchaError, solve_recaptcha_v3
+from legal.errors import CAPTCHA_SOLVER_CAPABILITY, LegalCliError, parse_error, usage_error
+from legal.http import LegalHttpClient
+from legal.models import JsonDict, LegalDocument, LegalItem, LegalResponse, PageInfo, Provenance
+from legal.pagination import decode_cursor, make_cursor
+from legal.parsing import (
     HtmlNode,
     clean_snippet,
     clean_text,
@@ -32,8 +32,8 @@ from apps.legal.parsing import (
     normalize_date,
     parse_html,
 )
-from apps.legal.registry import get_source
-from apps.legal.sources import SourceAdapter, register_adapter
+from legal.registry import get_source
+from legal.sources import SourceAdapter, register_adapter
 
 
 SOURCE_ID = "sentencias-scba"

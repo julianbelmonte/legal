@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from apps.legal.models import LegalError, LegalResponse, Provenance
+from legal.models import LegalError, LegalResponse, Provenance
 
 
 ErrorCode = Literal[

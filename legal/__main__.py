@@ -28,7 +28,7 @@ def _ensure_repo_root_on_path() -> None:
 
 def main(argv: Sequence[str] | None = None) -> int:
     _ensure_repo_root_on_path()
-    from apps.legal import cli
+    from legal import cli
 
     return cli.main(argv)
 

@@ -7,7 +7,7 @@ from typing import Any
 
 import httpx
 
-from apps.legal.config import capsolver_api_key
+from legal.config import capsolver_api_key
 
 
 BASE_URL = "https://api.capsolver.com"

@@ -7,7 +7,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from apps.legal.models import LegalResponse, SourceInfo
+from legal.models import LegalResponse, SourceInfo
 
 
 CommandResult = LegalResponse | Mapping[str, Any]

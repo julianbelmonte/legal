@@ -14,14 +14,14 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from apps.legal.cache import ensure_cache_dir, get_cache_dir
-from apps.legal.errors import LegalCliError, not_found, parse_error, usage_error
-from apps.legal.http import LegalHttpClient
-from apps.legal.models import LegalDocument, LegalItem, LegalResponse, Provenance
-from apps.legal.pagination import build_page_info, decode_cursor
-from apps.legal.parsing import absolute_url, classify_link, clean_text, normalize_date
-from apps.legal.registry import get_source
-from apps.legal.sources import SourceAdapter, register_adapter
+from legal.cache import ensure_cache_dir, get_cache_dir
+from legal.errors import LegalCliError, not_found, parse_error, usage_error
+from legal.http import LegalHttpClient
+from legal.models import LegalDocument, LegalItem, LegalResponse, Provenance
+from legal.pagination import build_page_info, decode_cursor
+from legal.parsing import absolute_url, classify_link, clean_text, normalize_date
+from legal.registry import get_source
+from legal.sources import SourceAdapter, register_adapter
 
 
 SOURCE_ID = "aaip"

@@ -10,14 +10,14 @@ from datetime import date
 from typing import Any
 from urllib.parse import quote
 
-from apps.legal.errors import parse_error, usage_error
-from apps.legal.http import LegalHttpClient
-from apps.legal.models import JsonDict, LegalDocument, LegalItem, LegalResponse, PageInfo, Provenance
-from apps.legal.pagination import decode_cursor, make_cursor
-from apps.legal.parsing import clean_text
-from apps.legal.registry import get_source
-from apps.legal.sources import SourceAdapter, register_adapter
-from apps.legal.sources import pjn_juris, tfn
+from legal.errors import parse_error, usage_error
+from legal.http import LegalHttpClient
+from legal.models import JsonDict, LegalDocument, LegalItem, LegalResponse, PageInfo, Provenance
+from legal.pagination import decode_cursor, make_cursor
+from legal.parsing import clean_text
+from legal.registry import get_source
+from legal.sources import SourceAdapter, register_adapter
+from legal.sources import pjn_juris, tfn
 
 
 SOURCE_ID = "cnacaf"

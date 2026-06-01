@@ -6,14 +6,14 @@ import argparse
 import re
 from typing import Any
 
-from apps.legal import enrichment
-from apps.legal.browser import BotBrowser
-from apps.legal.errors import usage_error
-from apps.legal.models import JsonDict, LegalDocument, LegalError, LegalItem, LegalResponse, PageInfo, Provenance
-from apps.legal.parsing import HtmlNode, parse_html
-from apps.legal.pdf import extract_text
-from apps.legal.registry import SOURCE_BY_ID
-from apps.legal.sources import SourceAdapter, register_adapter
+from legal import enrichment
+from legal.browser import BotBrowser
+from legal.errors import usage_error
+from legal.models import JsonDict, LegalDocument, LegalError, LegalItem, LegalResponse, PageInfo, Provenance
+from legal.parsing import HtmlNode, parse_html
+from legal.pdf import extract_text
+from legal.registry import SOURCE_BY_ID
+from legal.sources import SourceAdapter, register_adapter
 
 
 SOURCE_ID = "csjn"

@@ -12,11 +12,11 @@ from urllib.parse import parse_qs, urlencode, urlparse
 
 import httpx
 
-from apps.legal.cache import SearchCacheRecord, load_search_state, save_search_state
-from apps.legal.errors import not_found, parse_error, usage_error
-from apps.legal.http import LegalHttpClient
-from apps.legal.models import JsonDict, LegalDocument, LegalItem, LegalResponse, PageInfo, Provenance
-from apps.legal.parsing import (
+from legal.cache import SearchCacheRecord, load_search_state, save_search_state
+from legal.errors import not_found, parse_error, usage_error
+from legal.http import LegalHttpClient
+from legal.models import JsonDict, LegalDocument, LegalItem, LegalResponse, PageInfo, Provenance
+from legal.parsing import (
     HtmlNode,
     absolute_url,
     clean_snippet,
@@ -25,8 +25,8 @@ from apps.legal.parsing import (
     normalize_date,
     parse_html,
 )
-from apps.legal.registry import get_source
-from apps.legal.sources import SourceAdapter, register_adapter
+from legal.registry import get_source
+from legal.sources import SourceAdapter, register_adapter
 
 
 SOURCE_ID = "juba"

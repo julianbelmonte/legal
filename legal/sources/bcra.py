@@ -13,13 +13,13 @@ from urllib.parse import unquote, urlparse
 
 import httpx
 
-from apps.legal.errors import LegalCliError, parse_error, usage_error
-from apps.legal.http import LegalHttpClient
-from apps.legal.models import LegalDocument, LegalItem, LegalResponse, Provenance
-from apps.legal.pagination import build_page_info, decode_cursor
-from apps.legal.parsing import classify_link, clean_snippet, clean_text, normalize_date
-from apps.legal.registry import get_source
-from apps.legal.sources import SourceAdapter, register_adapter
+from legal.errors import LegalCliError, parse_error, usage_error
+from legal.http import LegalHttpClient
+from legal.models import LegalDocument, LegalItem, LegalResponse, Provenance
+from legal.pagination import build_page_info, decode_cursor
+from legal.parsing import classify_link, clean_snippet, clean_text, normalize_date
+from legal.registry import get_source
+from legal.sources import SourceAdapter, register_adapter
 
 
 SOURCE_ID = "bcra"

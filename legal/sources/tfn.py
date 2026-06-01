@@ -13,13 +13,13 @@ from urllib.parse import quote, unquote, urlparse
 
 import httpx
 
-from apps.legal.errors import LegalCliError, parse_error, usage_error
-from apps.legal.http import LegalHttpClient
-from apps.legal.models import JsonDict, LegalDocument, LegalItem, LegalResponse, PageInfo, Provenance
-from apps.legal.pagination import decode_cursor, make_cursor, page_info_from_offset
-from apps.legal.parsing import classify_link, clean_snippet, clean_text, normalize_date
-from apps.legal.registry import get_source
-from apps.legal.sources import SourceAdapter, register_adapter
+from legal.errors import LegalCliError, parse_error, usage_error
+from legal.http import LegalHttpClient
+from legal.models import JsonDict, LegalDocument, LegalItem, LegalResponse, PageInfo, Provenance
+from legal.pagination import decode_cursor, make_cursor, page_info_from_offset
+from legal.parsing import classify_link, clean_snippet, clean_text, normalize_date
+from legal.registry import get_source
+from legal.sources import SourceAdapter, register_adapter
 
 
 SOURCE_ID = "tfn"

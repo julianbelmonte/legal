@@ -13,12 +13,12 @@ from urllib.parse import urlparse, urlunparse
 
 import httpx
 
-from apps.legal.errors import LegalCliError, parse_error, usage_error
-from apps.legal.http import LegalHttpClient
-from apps.legal.models import JsonDict, LegalDocument, LegalItem, LegalResponse, PageInfo, Provenance
-from apps.legal.parsing import HtmlNode, absolute_url, clean_snippet, clean_text, normalize_date, parse_html
-from apps.legal.registry import get_source
-from apps.legal.sources import SourceAdapter, register_adapter
+from legal.errors import LegalCliError, parse_error, usage_error
+from legal.http import LegalHttpClient
+from legal.models import JsonDict, LegalDocument, LegalItem, LegalResponse, PageInfo, Provenance
+from legal.parsing import HtmlNode, absolute_url, clean_snippet, clean_text, normalize_date, parse_html
+from legal.registry import get_source
+from legal.sources import SourceAdapter, register_adapter
 
 
 SOURCE_ID = "bo-pba"

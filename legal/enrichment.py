@@ -6,7 +6,7 @@ import argparse
 from pathlib import Path
 from typing import Any
 
-from apps.legal.pdf import extract_text
+from legal.pdf import extract_text
 
 
 def add_text_arguments(parser: argparse.ArgumentParser) -> None:

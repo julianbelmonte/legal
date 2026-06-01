@@ -10,8 +10,8 @@ from collections.abc import Mapping
 from dataclasses import replace
 from typing import Any, Sequence
 
-from apps.legal.errors import LegalCliError, usage_error
-from apps.legal.models import (
+from legal.errors import LegalCliError, usage_error
+from legal.models import (
     LegalDocument,
     LegalError,
     LegalItem,
@@ -19,10 +19,10 @@ from apps.legal.models import (
     PageInfo,
     Provenance,
 )
-from apps.legal.registry import REQUIRES_SEARCH_FILTERS_CAPABILITY, SOURCES, SOURCE_IDS, list_sources
-from apps.legal.schema import LEGAL_RESPONSE_SCHEMA
-from apps.legal.sources import default_operation, get_adapter
-from apps.legal.sources.base import SourceOperation
+from legal.registry import REQUIRES_SEARCH_FILTERS_CAPABILITY, SOURCES, SOURCE_IDS, list_sources
+from legal.schema import LEGAL_RESPONSE_SCHEMA
+from legal.sources import default_operation, get_adapter
+from legal.sources.base import SourceOperation
 
 
 class JsonArgumentParser(argparse.ArgumentParser):
@@ -510,7 +510,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_source_shared_flags(operation_shared_parent)
 
     parser = JsonArgumentParser(
-        prog="python -m apps.legal.cli",
+        prog="python -m legal.cli",
         description="Portable JSON CLI for Argentina legal sources.",
     )
     _add_pretty(parser)

@@ -7,13 +7,13 @@ from collections.abc import Callable
 import re
 from typing import Any
 
-from apps.legal.browser import BotBrowser
-from apps.legal.captcha import solve_image
-from apps.legal.errors import LegalCliError
-from apps.legal.models import LegalError, LegalItem, LegalResponse, Provenance
-from apps.legal.parsing import parse_html
-from apps.legal.registry import SOURCE_BY_ID
-from apps.legal.sources import SourceAdapter, register_adapter
+from legal.browser import BotBrowser
+from legal.captcha import solve_image
+from legal.errors import LegalCliError
+from legal.models import LegalError, LegalItem, LegalResponse, Provenance
+from legal.parsing import parse_html
+from legal.registry import SOURCE_BY_ID
+from legal.sources import SourceAdapter, register_adapter
 
 
 SOURCE_ID = "pjn-expedientes"

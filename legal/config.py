@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 try:
-    from apps.legal import local_config as _local_config
+    from legal import local_config as _local_config
 except ImportError:
     _local_config = None
 

@@ -1,4 +1,4 @@
-"""Local configuration template for apps.legal.
+"""Local configuration template for legal.
 
 Copy this file to local_config.py or run scripts/bootstrap.py, then fill in
 CAPSOLVER_API_KEY with your capsolver.com client key. Leave BotBrowser path

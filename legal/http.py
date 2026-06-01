@@ -8,8 +8,8 @@ from typing import Any, Mapping
 
 import httpx
 
-from apps.legal.errors import LegalCliError, network_error, not_found, parse_error, source_unavailable
-from apps.legal.models import Provenance
+from legal.errors import LegalCliError, network_error, not_found, parse_error, source_unavailable
+from legal.models import Provenance
 
 
 DEFAULT_TIMEOUT = 30.0
