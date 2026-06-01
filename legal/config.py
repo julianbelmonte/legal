@@ -7,6 +7,11 @@ from pathlib import Path
 from typing import Any
 
 try:
+    from legal import secret as _secret
+except ImportError:
+    _secret = None
+
+try:
     from legal import local_config as _local_config
 except ImportError:
     _local_config = None
@@ -20,6 +25,30 @@ def _configured_value(name: str) -> Any:
     if _local_config is None:
         return None
     return getattr(_local_config, name, None)
+
+
+def _secret_value(name: str) -> Any:
+    """Resolve a secret named ``name`` through the standard chain.
+
+    Order: environment (``LEGAL_<NAME>``, plus the historical
+    ``LEGAL_CAPSOLVER_API_KEY``) → ``legal.secret`` module → legacy
+    ``legal.local_config`` module → ``None``.
+    """
+
+    env_names = [f"LEGAL_{name}"]
+    if name == "CAPSOLVER_API_KEY" and "LEGAL_CAPSOLVER_API_KEY" not in env_names:
+        env_names.append("LEGAL_CAPSOLVER_API_KEY")
+    for env_name in env_names:
+        value = _non_empty(os.environ.get(env_name))
+        if value is not None:
+            return value
+
+    if _secret is not None:
+        value = _non_empty(getattr(_secret, name, None))
+        if value is not None:
+            return value
+
+    return _non_empty(_configured_value(name))
 
 
 def _non_empty(value: Any) -> Any:
@@ -45,15 +74,40 @@ def _first_existing(candidates: list[Path]) -> Path | None:
 
 
 def capsolver_api_key() -> str:
-    """Return the Capsolver API key from env or local config."""
+    """Return the Capsolver API key from env, secret.py, or local config."""
 
-    value = _non_empty(os.environ.get("LEGAL_CAPSOLVER_API_KEY"))
-    if value is None:
-        value = _non_empty(_configured_value("CAPSOLVER_API_KEY"))
+    value = _secret_value("CAPSOLVER_API_KEY")
     if value is None:
         raise RuntimeError(
             "Capsolver API key is not configured. Set LEGAL_CAPSOLVER_API_KEY "
-            "or run legal/scripts/bootstrap.py to create legal/local_config.py."
+            "or add CAPSOLVER_API_KEY to legal/secret.py "
+            "(copy legal/secret.example.py)."
+        )
+    return str(value)
+
+
+def floxy_user() -> str:
+    """Return the Floxy proxy username from env, secret.py, or local config."""
+
+    value = _secret_value("FLOXY_USER")
+    if value is None:
+        raise RuntimeError(
+            "Floxy user is not configured. Set LEGAL_FLOXY_USER "
+            "or add FLOXY_USER to legal/secret.py "
+            "(copy legal/secret.example.py)."
+        )
+    return str(value)
+
+
+def floxy_pass() -> str:
+    """Return the Floxy proxy password from env, secret.py, or local config."""
+
+    value = _secret_value("FLOXY_PASS")
+    if value is None:
+        raise RuntimeError(
+            "Floxy pass is not configured. Set LEGAL_FLOXY_PASS "
+            "or add FLOXY_PASS to legal/secret.py "
+            "(copy legal/secret.example.py)."
         )
     return str(value)
 
@@ -119,6 +173,8 @@ def pick_profile() -> Path:
 
 __all__ = [
     "capsolver_api_key",
+    "floxy_user",
+    "floxy_pass",
     "botbrowser_bin",
     "botbrowser_profiles_dir",
     "pick_profile",
