@@ -13,10 +13,8 @@ from typing import Any, Sequence
 from legal.errors import LegalCliError, usage_error
 from legal.models import (
     LegalDocument,
-    LegalError,
     LegalItem,
     LegalResponse,
-    PageInfo,
     Provenance,
 )
 from legal.registry import REQUIRES_SEARCH_FILTERS_CAPABILITY, SOURCES, SOURCE_IDS, list_sources
@@ -114,159 +112,17 @@ def cmd_source_operation(args: argparse.Namespace) -> int:
 
 
 def cmd_global_search(args: argparse.Namespace) -> int:
-    source_ids = _select_global_search_sources(args)
-    query = {
-        "text": args.text,
-        "sources": source_ids,
-        "all_direct": bool(args.all_direct),
-        "limit_per_source": args.limit_per_source,
-        "raw": bool(args.raw),
-    }
-    items: list[Any] = []
-    source_results: dict[str, dict[str, Any]] = {}
-    source_errors: dict[str, dict[str, Any]] = {}
-    warnings: list[str] = []
-    fetched_urls: list[str] = []
-    source_urls: list[str] = []
-    has_more = False
-    total = 0
-    total_known = True
-    success_count = 0
+    from legal.global_search import run_global_search
 
-    for source_id in source_ids:
-        try:
-            operation = _source_operation(source_id, "search")
-            source_args = _build_global_source_search_args(
-                source_id=source_id,
-                operation=operation,
-                text=args.text,
-                limit=args.limit_per_source,
-                raw=bool(args.raw),
-            )
-            result = operation.handler(source_args)
-            payload = _result_payload(result)
-        except LegalCliError as error:
-            error_payload = error.to_error().to_dict()
-            source_errors[source_id] = error_payload
-            source_results[source_id] = {
-                "ok": False,
-                "error": error_payload,
-                "warnings": [],
-            }
-            warnings.append(f"{source_id} search failed: {error.code}")
-            if error.provenance is not None:
-                _extend_unique(source_urls, error.provenance.source_urls)
-                _extend_unique(fetched_urls, error.provenance.fetched_urls)
-            continue
-        except Exception as exc:  # pragma: no cover - defensive contract guard
-            error = LegalError(
-                code="parse_error",
-                message=f"{source_id} search failed unexpectedly",
-                retryable=False,
-                details={"source": source_id, "exception_type": type(exc).__name__},
-            )
-            error_payload = error.to_dict()
-            source_errors[source_id] = error_payload
-            source_results[source_id] = {
-                "ok": False,
-                "error": error_payload,
-                "warnings": [],
-            }
-            warnings.append(f"{source_id} search failed: parse_error")
-            continue
-
-        provenance = payload.get("provenance")
-        if isinstance(provenance, Mapping):
-            _extend_unique(source_urls, provenance.get("source_urls", []))
-            _extend_unique(fetched_urls, provenance.get("fetched_urls", []))
-
-        page = payload.get("page")
-        page_payload = dict(page) if isinstance(page, Mapping) else {}
-        source_warnings = [str(warning) for warning in payload.get("warnings", [])]
-        if not payload.get("ok", True):
-            error_payload = _mapping_or_empty(payload.get("error"))
-            source_errors[source_id] = error_payload
-            source_results[source_id] = {
-                "ok": False,
-                "error": error_payload,
-                "page": page_payload,
-                "warnings": source_warnings,
-            }
-            warnings.append(
-                f"{source_id} search failed: {error_payload.get('code', 'source_error')}"
-            )
-            continue
-
-        source_items = list(payload.get("items") or [])
-        tagged_items = [_tag_global_item(item, source_id) for item in source_items]
-        items.extend(tagged_items)
-        success_count += 1
-        has_more = has_more or bool(page_payload.get("has_more", False))
-        page_total = page_payload.get("total")
-        if isinstance(page_total, int):
-            total += page_total
-        else:
-            total_known = False
-        source_results[source_id] = {
-            "ok": True,
-            "item_count": len(source_items),
-            "page": page_payload,
-            "query": _mapping_or_empty(payload.get("query")),
-            "warnings": source_warnings,
-        }
-        warnings.extend(f"{source_id}: {warning}" for warning in source_warnings)
-
-    provenance = Provenance(
-        source_urls=source_urls,
-        fetched_urls=fetched_urls,
-        source_map="legal/registry.py",
-        raw={"sources": source_results},
-    )
-    if success_count == 0:
-        emit_json(
-            LegalResponse.error_response(
-                source="legal",
-                operation="search",
-                query=query,
-                error=LegalError(
-                    code="source_unavailable",
-                    message="all selected source searches failed",
-                    retryable=any(
-                        error.get("retryable") is True for error in source_errors.values()
-                    ),
-                    details={"sources": source_errors},
-                ),
-                provenance=provenance,
-                warnings=warnings,
-            ),
-            pretty=args.pretty,
-        )
-        return 1
-
-    response = LegalResponse.search(
-        source="legal",
-        operation="search",
-        query=query,
-        items=items,
-        page=PageInfo(
-            limit=args.limit_per_source * len(source_ids),
-            total=total if total_known else None,
-            has_more=has_more,
-        ),
-        provenance=provenance,
-        warnings=warnings,
-        facets={
-            "sources": source_results,
-            "source_errors": source_errors,
-            "pagination": {
-                source_id: result.get("page", {})
-                for source_id, result in source_results.items()
-                if result.get("page")
-            },
-        },
+    response = run_global_search(
+        text=args.text,
+        sources=list(args.global_sources or []),
+        all_direct=bool(args.all_direct),
+        limit_per_source=args.limit_per_source,
+        raw=bool(args.raw),
     )
     emit_json(response, pretty=args.pretty)
-    return 0
+    return 0 if response.ok else 1
 
 
 def cmd_missing_source_operation(args: argparse.Namespace) -> int:
