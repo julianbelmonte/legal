@@ -17,7 +17,7 @@ from fastapi.responses import JSONResponse
 from legal.errors import LegalCliError
 
 from api.errors import error_to_envelope
-from api.routers import discovery, generic
+from api.routers import discovery, generic, search
 
 DESCRIPTION = (
     "Uniform HTTP access to Argentina legal research data sources. Every "
@@ -56,6 +56,7 @@ def create_app() -> FastAPI:
 
     app.include_router(discovery.router)
     app.include_router(generic.router)
+    app.include_router(search.router)
 
     return app
 
