@@ -45,6 +45,7 @@ def build_client(
     transport: httpx.BaseTransport | None = None,
     base_url: str | httpx.URL = "",
     headers: Mapping[str, str] | None = None,
+    proxy: str | None = None,
 ) -> httpx.Client:
     """Create a portable httpx client with conservative defaults."""
     resolved = settings or HttpSettings()
@@ -54,13 +55,26 @@ def build_client(
         **(resolved.headers or {}),
         **(headers or {}),
     }
-    return httpx.Client(
-        base_url=base_url,
-        headers=resolved_headers,
-        follow_redirects=True,
-        timeout=resolved.timeout,
-        transport=transport,
-    )
+    if transport is not None:
+        # A transport and a proxy are mutually exclusive in httpx; transport wins
+        # (keeps offline tests injecting MockTransport working).
+        resolved_proxy: str | None = None
+    elif proxy is not None:
+        resolved_proxy = proxy
+    else:
+        from legal.providers.proxy import resolve_proxy
+
+        resolved_proxy = resolve_proxy()
+    client_kwargs: dict[str, Any] = {
+        "base_url": base_url,
+        "headers": resolved_headers,
+        "follow_redirects": True,
+        "timeout": resolved.timeout,
+        "transport": transport,
+    }
+    if resolved_proxy is not None:
+        client_kwargs["proxy"] = resolved_proxy
+    return httpx.Client(**client_kwargs)
 
 
 class LegalHttpClient:
@@ -74,6 +88,7 @@ class LegalHttpClient:
         transport: httpx.BaseTransport | None = None,
         base_url: str | httpx.URL = "",
         headers: Mapping[str, str] | None = None,
+        proxy: str | None = None,
     ) -> None:
         if client is not None and transport is not None:
             raise ValueError("pass either client or transport, not both")
@@ -83,6 +98,7 @@ class LegalHttpClient:
             transport=transport,
             base_url=base_url,
             headers=headers,
+            proxy=proxy,
         )
         self._owns_client = client is None
 
