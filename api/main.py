@@ -17,6 +17,7 @@ from fastapi.responses import JSONResponse
 from legal.errors import LegalCliError
 
 from api.errors import error_to_envelope
+from api.routers import generic
 
 DESCRIPTION = (
     "Uniform HTTP access to Argentina legal research data sources. Every "
@@ -52,6 +53,8 @@ def create_app() -> FastAPI:
     def healthz() -> dict[str, object]:
         """Unauthenticated liveness probe."""
         return {"ok": True, "service": "legal-api"}
+
+    app.include_router(generic.router)
 
     return app
 
