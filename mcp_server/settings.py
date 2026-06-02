@@ -52,6 +52,11 @@ class McpSettings(BaseSettings):
     # Comma-separated allowlist of OAuth client ids / redirect origins. Empty
     # means dynamic client registration is open (suitable for offline tests).
     oauth_client_allowlist: str = ""
+    # Comma-separated allowlist of redirect URIs accepted in the authorization
+    # flow. Empty means any redirect registered by the client is accepted.
+    oauth_redirect_uris: str = ""
+    # Lifetime, in seconds, of issued OAuth access tokens.
+    oauth_token_ttl_seconds: int = 3600
 
     # --- Document text cache -------------------------------------------------
     # Time-to-live, in seconds, for extracted document text cache records.
@@ -59,7 +64,9 @@ class McpSettings(BaseSettings):
     # Maximum characters returned per document text page.
     max_page_size: int = 20000
 
-    @field_validator("cache_ttl_seconds", "max_page_size")
+    @field_validator(
+        "cache_ttl_seconds", "max_page_size", "oauth_token_ttl_seconds"
+    )
     @classmethod
     def _positive(cls, value: int) -> int:
         if value <= 0:
@@ -69,6 +76,18 @@ class McpSettings(BaseSettings):
     def issuer(self) -> str:
         """Return the OAuth issuer, defaulting to the public URL."""
         return self.oauth_issuer or str(self.public_url)
+
+    def resource(self) -> str:
+        """Return the OAuth protected-resource URL / token audience."""
+        return str(self.public_url)
+
+    def allowed_redirect_uris(self) -> set[str]:
+        """Return the configured redirect-URI allowlist; empty when none."""
+        return {
+            candidate.strip()
+            for candidate in self.oauth_redirect_uris.split(",")
+            if candidate.strip()
+        }
 
     def allowed_email_set(self) -> set[str]:
         """Return the set of allowed (case-folded) emails; empty when none."""
