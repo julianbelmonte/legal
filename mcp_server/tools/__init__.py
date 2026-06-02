@@ -21,6 +21,7 @@ from mcp_server.tools.discovery import (
     legal_sources,
 )
 from mcp_server.tools.document_text import (
+    legal_find_in_document_text,
     legal_get_document_text,
     legal_get_document_text_page,
 )
@@ -35,4 +36,5 @@ __all__ = [
     "legal_run_operation",
     "legal_get_document_text",
     "legal_get_document_text_page",
+    "legal_find_in_document_text",
 ]

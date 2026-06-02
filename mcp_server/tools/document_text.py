@@ -44,8 +44,10 @@ from mcp_server.settings import get_mcp_settings
 __all__ = [
     "DOCUMENT_TEXT_TOOL_OPERATION",
     "DOCUMENT_TEXT_PAGE_TOOL_OPERATION",
+    "DOCUMENT_TEXT_FIND_TOOL_OPERATION",
     "legal_get_document_text",
     "legal_get_document_text_page",
+    "legal_find_in_document_text",
     "build_text_page",
 ]
 
@@ -55,6 +57,12 @@ DOCUMENT_TEXT_TOOL_OPERATION = "get_document_text"
 
 # Operation tag for cursor-driven page reads.
 DOCUMENT_TEXT_PAGE_TOOL_OPERATION = "get_document_text_page"
+
+# Operation tag for search-within-document reads.
+DOCUMENT_TEXT_FIND_TOOL_OPERATION = "find_in_document_text"
+
+# Number of characters of context to include on each side of a match snippet.
+_FIND_SNIPPET_CONTEXT = 120
 
 
 def _resolve_page_size(page_size_chars: int | None) -> int:
@@ -167,6 +175,76 @@ def _document_metadata(document: Mapping[str, Any]) -> dict[str, Any]:
     return {key: document[key] for key in fields if document.get(key) is not None}
 
 
+def _resolve_and_cache_document(
+    source_id: str,
+    document_id: str,
+    *,
+    params: Mapping[str, Any] | None,
+    operation: str,
+) -> tuple[DocumentTextRecord, dict[str, Any], Any, list[Any]] | dict[str, Any]:
+    """Resolve a document reference, extract its text, and cache it.
+
+    Dispatches the source's document-text resolver, extracts the full text, and
+    persists a TTL :class:`DocumentTextRecord`. On success returns the tuple
+    ``(record, metadata, provenance, warnings)``; on any failure returns the
+    normalized error envelope to surface unchanged. Raw PDF bytes and filesystem
+    save paths are never read out or stored.
+    """
+    resolver = get_document_text_resolver(source_id)
+    if resolver is None:
+        return to_jsonable(document_text_error(source_id))
+
+    result = resolver.fetch(document_id, overrides=params)
+
+    try:
+        envelope = to_jsonable(result)
+    except SerializationError as exc:
+        return error_envelope(
+            source=source_id,
+            operation=operation,
+            message=str(exc),
+        )
+
+    # A failed fetch already carries the pipeline's normalized error envelope;
+    # surface it unchanged rather than caching an empty document.
+    if not envelope.get("ok", False) or envelope.get("error") is not None:
+        return envelope
+
+    document = envelope.get("document")
+    if not isinstance(document, Mapping):
+        return error_envelope(
+            source=source_id,
+            operation=operation,
+            message=(
+                f"source '{source_id}' returned no document for id {document_id!r}"
+            ),
+            code="source_unavailable",
+        )
+
+    text = _extract_text(document)
+    provenance = envelope.get("provenance")
+    warnings = envelope.get("warnings") or []
+    metadata = _document_metadata(document)
+
+    document_ref = {"source": source_id, "document_id": document_id}
+    if params:
+        document_ref["params"] = dict(params)
+
+    cache = DocumentTextCache()
+    record: DocumentTextRecord = cache.put(
+        source=source_id,
+        document_ref=document_ref,
+        text=text,
+        metadata=metadata,
+        query_hash=_query_hash(document_ref),
+        title=metadata.get("title"),
+        date=metadata.get("date"),
+        url=metadata.get("url"),
+        provenance=provenance if isinstance(provenance, Mapping) else None,
+    )
+    return record, metadata, provenance, warnings
+
+
 def legal_get_document_text(
     source_id: str,
     document_id: str,
@@ -196,60 +274,20 @@ def legal_get_document_text(
     ``has_more`` False, ``next_cursor`` None). Raw PDF bytes and filesystem save
     paths are never exposed.
     """
-    resolver = get_document_text_resolver(source_id)
-    if resolver is None:
-        return to_jsonable(document_text_error(source_id))
+    resolved = _resolve_and_cache_document(
+        source_id,
+        document_id,
+        params=params,
+        operation=DOCUMENT_TEXT_TOOL_OPERATION,
+    )
+    if isinstance(resolved, dict):
+        # An error envelope was produced instead of a cached record.
+        return resolved
+
+    record, metadata, provenance, warnings = resolved
+    text = record.text
 
     page_size = _resolve_page_size(page_size_chars)
-
-    result = resolver.fetch(document_id, overrides=params)
-
-    try:
-        envelope = to_jsonable(result)
-    except SerializationError as exc:
-        return error_envelope(
-            source=source_id,
-            operation=DOCUMENT_TEXT_TOOL_OPERATION,
-            message=str(exc),
-        )
-
-    # A failed fetch already carries the pipeline's normalized error envelope;
-    # surface it unchanged rather than caching an empty document.
-    if not envelope.get("ok", False) or envelope.get("error") is not None:
-        return envelope
-
-    document = envelope.get("document")
-    if not isinstance(document, Mapping):
-        return error_envelope(
-            source=source_id,
-            operation=DOCUMENT_TEXT_TOOL_OPERATION,
-            message=(
-                f"source '{source_id}' returned no document for id {document_id!r}"
-            ),
-            code="source_unavailable",
-        )
-
-    text = _extract_text(document)
-    provenance = envelope.get("provenance")
-    warnings = envelope.get("warnings") or []
-    metadata = _document_metadata(document)
-
-    document_ref = {"source": source_id, "document_id": document_id}
-    if params:
-        document_ref["params"] = dict(params)
-
-    cache = DocumentTextCache()
-    record: DocumentTextRecord = cache.put(
-        source=source_id,
-        document_ref=document_ref,
-        text=text,
-        metadata=metadata,
-        query_hash=_query_hash(document_ref),
-        title=metadata.get("title"),
-        date=metadata.get("date"),
-        url=metadata.get("url"),
-        provenance=provenance if isinstance(provenance, Mapping) else None,
-    )
 
     page = build_text_page(
         cache_id=record.cache_id,
@@ -342,4 +380,182 @@ def legal_get_document_text_page(cursor: str) -> dict[str, Any]:
         "page": page["page"],
         "provenance": record.provenance or None,
         "warnings": [],
+    }
+
+
+def _find_matches(
+    *,
+    cache_id: str,
+    source: str,
+    text: str,
+    query: str,
+    limit: int,
+) -> list[dict[str, Any]]:
+    """Find every (case-insensitive) occurrence of ``query`` in ``text``.
+
+    Returns one item per match, each carrying the match's character range
+    (``start_char``/``end_char``), a context ``snippet`` around it, and a page
+    ``cursor`` that opens a window *around* the match so the agent can page from
+    there. Returns an empty list when ``query`` is empty or has no match.
+    """
+    items: list[dict[str, Any]] = []
+    if not query:
+        return items
+
+    total = len(text)
+    haystack = text.lower()
+    needle = query.lower()
+    start = 0
+    while True:
+        index = haystack.find(needle, start)
+        if index < 0:
+            break
+        end = index + len(needle)
+
+        snippet_start = max(0, index - _FIND_SNIPPET_CONTEXT)
+        snippet_end = min(total, end + _FIND_SNIPPET_CONTEXT)
+        snippet = text[snippet_start:snippet_end]
+
+        # Open the page window centered around the match so the next read shows
+        # context on both sides of the hit.
+        window_offset = max(0, index - (limit // 2))
+        cursor = make_document_text_cursor(
+            cache_id=cache_id,
+            source=source,
+            offset=window_offset,
+            limit=limit,
+        )
+
+        items.append(
+            {
+                "snippet": snippet,
+                "start_char": index,
+                "end_char": end,
+                "snippet_start_char": snippet_start,
+                "snippet_end_char": snippet_end,
+                "cursor": cursor,
+            }
+        )
+
+        # Advance past this match; guard against an empty needle (already
+        # excluded above) by stepping at least one character.
+        start = end if end > index else index + 1
+
+    return items
+
+
+def legal_find_in_document_text(
+    query: str,
+    cursor: str | None = None,
+    source_id: str | None = None,
+    document_id: str | None = None,
+    params: Mapping[str, Any] | None = None,
+    page_size_chars: int | None = None,
+) -> dict[str, Any]:
+    """Search within a document's cached text and return match snippets + cursors.
+
+    Accepts either:
+
+    - a document text ``cursor`` — its ``cache_id`` is used to load the cached
+      text directly (no refetch). A missing/expired cache record returns a
+      normalized **retryable** error envelope so the client re-fetches and obtains
+      a fresh cursor; or
+    - a document reference (``source_id`` + ``document_id``, with optional
+      ``params``) — the document is resolved, its text extracted, and cached
+      first (reusing the ``legal_get_document_text`` path), then searched.
+
+    Finds **all** case-insensitive occurrences of ``query``. Returns an
+    ``items`` list (non-empty when matches exist); each item carries a context
+    ``snippet``, the match character range (``start_char``/``end_char``), and a
+    page ``cursor`` opening a window around the match. Text is never silently
+    truncated and raw PDF bytes / save paths are never exposed.
+
+    A missing query or a request that supplies neither a cursor nor a complete
+    document reference returns the normalized ``usage_error`` envelope.
+    """
+    if not isinstance(query, str) or not query:
+        return error_envelope(
+            source=source_id or "document_text",
+            operation=DOCUMENT_TEXT_FIND_TOOL_OPERATION,
+            message="query must be a non-empty string",
+            code="usage_error",
+        )
+
+    page_size = _resolve_page_size(page_size_chars)
+
+    if cursor is not None:
+        try:
+            payload = decode_document_text_cursor(cursor)
+        except DocumentTextCursorError as exc:
+            return error_envelope(
+                source="document_text",
+                operation=DOCUMENT_TEXT_FIND_TOOL_OPERATION,
+                message=str(exc),
+                code="usage_error",
+            )
+
+        cache_id = payload["cache_id"]
+        source = payload["source"]
+
+        record = DocumentTextCache().get(cache_id)
+        if record is None:
+            return error_envelope(
+                source=source,
+                operation=DOCUMENT_TEXT_FIND_TOOL_OPERATION,
+                message=(
+                    f"document text cache id {cache_id!r} is unknown or expired; "
+                    "re-fetch the document to obtain a fresh cursor"
+                ),
+                code="cache_expired",
+                retryable=True,
+            )
+
+        metadata = record.metadata
+        provenance = record.provenance or None
+        warnings: list[Any] = []
+    else:
+        if not source_id or not document_id:
+            return error_envelope(
+                source=source_id or "document_text",
+                operation=DOCUMENT_TEXT_FIND_TOOL_OPERATION,
+                message=(
+                    "provide either a document text cursor or both source_id and "
+                    "document_id to search a document"
+                ),
+                code="usage_error",
+            )
+
+        resolved = _resolve_and_cache_document(
+            source_id,
+            document_id,
+            params=params,
+            operation=DOCUMENT_TEXT_FIND_TOOL_OPERATION,
+        )
+        if isinstance(resolved, dict):
+            return resolved
+
+        record, metadata, provenance, warnings = resolved
+        cache_id = record.cache_id
+        source = source_id
+
+    items = _find_matches(
+        cache_id=cache_id,
+        source=source,
+        text=record.text,
+        query=query,
+        limit=page_size,
+    )
+
+    return {
+        "ok": True,
+        "source": source,
+        "operation": DOCUMENT_TEXT_FIND_TOOL_OPERATION,
+        "document": metadata,
+        "cache_id": cache_id,
+        "query": query,
+        "items": items,
+        "match_count": len(items),
+        "total_chars": len(record.text),
+        "provenance": provenance,
+        "warnings": warnings,
     }
