@@ -2,7 +2,15 @@
 
 This module exposes the app shell: the ``create_app`` factory, an
 unauthenticated ``/healthz`` endpoint, and a module-level ``app`` for uvicorn.
-Routers and authentication attach in later steps.
+
+A single ASGI app serves three surfaces behind one uvicorn process:
+
+* the existing API routes (``/v1`` with ``x-api-key`` auth) plus ``/healthz``,
+  unchanged;
+* the OAuth discovery/flow endpoints (``/.well-known/*`` and ``/oauth/*``),
+  reachable without a bearer token, wired to the single-user OAuth provider;
+* the MCP streamable-HTTP transport mounted at ``/mcp``, bearer-protected so
+  unauthenticated calls get ``401`` + ``WWW-Authenticate``.
 
 Run locally with::
 
@@ -18,6 +26,8 @@ from legal.errors import LegalCliError
 
 from api.errors import error_to_envelope
 from api.routers import csjn, discovery, generic, saij, search
+from mcp_server.auth.routes import build_oauth_routes
+from mcp_server.main import build_mcp_asgi_app
 
 DESCRIPTION = (
     "Uniform HTTP access to Argentina legal research data sources. Every "
@@ -59,6 +69,17 @@ def create_app() -> FastAPI:
     app.include_router(search.router)
     app.include_router(csjn.router)
     app.include_router(saij.router)
+
+    # OAuth discovery + flow endpoints, reachable without a bearer token. These
+    # are Starlette routes (``/.well-known/*`` and ``/oauth/*``) added directly
+    # so the API and the MCP transport advertise a single OAuth surface.
+    app.router.routes.extend(build_oauth_routes())
+
+    # MCP streamable-HTTP transport, bearer-protected by the wrapping
+    # middleware. Mounting at ``/mcp`` lands the transport's root endpoint
+    # exactly at ``/mcp``; Starlette runs the mounted app's lifespan (the MCP
+    # session manager) alongside the API's.
+    app.mount("/mcp", build_mcp_asgi_app())
 
     return app
 

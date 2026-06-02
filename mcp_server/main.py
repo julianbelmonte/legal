@@ -7,8 +7,11 @@ module-level ``app`` for ASGI serving. The MCP server is a sibling consumer to
 ``legal.pagination``, ``legal.cache``, ``legal.models``) and adds no
 source-access logic of its own.
 
-Tool registration, OAuth protection, and ASGI mounting beside the API attach in
-later steps. Run locally for development with::
+The MCP transport is served over streamable HTTP. ``create_app`` returns a
+mountable ASGI app that bundles the OAuth discovery/flow routes (reachable
+without a bearer token) and the bearer-protected ``/mcp`` transport, so the same
+factory can run standalone or be mounted beside the API (see
+``api.main.create_app``). Run the standalone MCP app locally with::
 
     uv run python -m mcp_server.main
 """
@@ -17,7 +20,13 @@ from __future__ import annotations
 
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
+from starlette.applications import Starlette
+from starlette.responses import PlainTextResponse
+from starlette.routing import Mount, Route
+from starlette.types import ASGIApp
 
+from mcp_server.auth.routes import build_oauth_routes
+from mcp_server.auth.transport import BearerAuthMiddleware
 from mcp_server.settings import McpSettings, load_settings
 from mcp_server.tools import (
     legal_find_in_document_text,
@@ -71,22 +80,60 @@ def build_mcp_server(settings: McpSettings | None = None) -> FastMCP:
     from tests.
     """
     _ = settings or load_settings()
-    server = FastMCP(name=SERVER_NAME, instructions=SERVER_INSTRUCTIONS)
+    # ``streamable_http_path="/"`` makes the transport's own route ``/`` so the
+    # streamable app can be mounted at ``/mcp`` with the endpoint landing exactly
+    # at ``/mcp`` (rather than ``/mcp/mcp``).
+    server = FastMCP(
+        name=SERVER_NAME,
+        instructions=SERVER_INSTRUCTIONS,
+        streamable_http_path="/",
+    )
     read_only = ToolAnnotations(readOnlyHint=True)
     for tool in _READ_ONLY_TOOLS:
         server.add_tool(tool, annotations=read_only)
     return server
 
 
-def create_app(settings: McpSettings | None = None):
-    """Build and return the MCP server application.
+def build_mcp_asgi_app(settings: McpSettings | None = None) -> ASGIApp:
+    """Return the bearer-protected MCP streamable-HTTP ASGI app.
 
-    Stub: later steps construct the MCP server, register the compact tool
-    surface, attach OAuth metadata/protection, and return a mountable ASGI app.
-    Returning ``None`` keeps the skeleton importable without network services.
+    Builds the FastMCP streamable transport (endpoint at ``/`` so it mounts
+    cleanly at ``/mcp``) and wraps it in
+    :class:`~mcp_server.auth.transport.BearerAuthMiddleware`. The middleware
+    only challenges requests under the configured MCP path, so when the inner
+    app is mounted at ``/mcp`` the guard protects ``/mcp`` while leaving the
+    health and OAuth surfaces open. The streamable app carries its own lifespan
+    (the session manager), which the mounting parent runs.
     """
-    _ = settings or load_settings()
-    return None
+    settings = settings or load_settings()
+    server = build_mcp_server(settings)
+    return BearerAuthMiddleware(server.streamable_http_app(), settings=settings)
+
+
+def create_app(settings: McpSettings | None = None) -> Starlette:
+    """Build and return the standalone MCP ASGI application.
+
+    The returned Starlette app bundles:
+
+    * an unauthenticated ``/healthz`` liveness probe;
+    * the OAuth discovery + flow routes (``/.well-known/*`` and ``/oauth/*``),
+      reachable without a bearer token;
+    * the bearer-protected MCP streamable transport mounted at ``/mcp``.
+
+    The same app can run standalone under uvicorn or be composed beside the API
+    (the API's ``create_app`` mounts the MCP transport and registers the OAuth
+    routes through the same building blocks).
+    """
+    settings = settings or load_settings()
+    mcp_app = build_mcp_asgi_app(settings)
+
+    async def healthz(request):  # type: ignore[no-untyped-def]
+        return PlainTextResponse("ok")
+
+    routes = [Route("/healthz", healthz, methods=["GET"])]
+    routes.extend(build_oauth_routes(settings=settings))
+    routes.append(Mount("/mcp", app=mcp_app))
+    return Starlette(routes=routes)
 
 
 app = create_app()
@@ -95,10 +142,17 @@ app = create_app()
 def main() -> None:
     """Module entry point for local development.
 
-    Stub: later steps run the MCP ASGI app under a local server. For now this
-    only confirms the app shell is importable and constructable.
+    Runs the standalone MCP ASGI app under uvicorn. Bind host/port are read from
+    ``LEGAL_MCP_HOST`` / ``LEGAL_MCP_PORT`` (falling back to ``127.0.0.1:8081``)
+    so it does not collide with the API's default port.
     """
-    create_app()
+    import os
+
+    import uvicorn
+
+    host = os.environ.get("LEGAL_MCP_HOST", "127.0.0.1")
+    port = int(os.environ.get("LEGAL_MCP_PORT", "8081"))
+    uvicorn.run(app, host=host, port=port)
 
 
 if __name__ == "__main__":  # pragma: no cover - local dev entry point
