@@ -38,7 +38,8 @@ VENDOR_BOOTSTRAP_REL = "legal/scripts/bootstrap.py"
 APP_SERVICE_NAME = "legal-api"
 NGROK_SERVICE_NAME = "legal-ngrok"
 
-#: System packages needed for builds + headless browser / Playwright deps.
+#: Core system packages always installed (builds + tooling). These names are
+#: stable across recent Ubuntu releases.
 SYSTEM_PACKAGES = (
     "ca-certificates",
     "curl",
@@ -48,11 +49,21 @@ SYSTEM_PACKAGES = (
     "pkg-config",
     "xvfb",
     "fonts-liberation",
+)
+
+#: Headless-browser / Playwright shared-library deps. Ubuntu 24.04 (noble)
+#: renamed several of these in the time_t-64 (``t64``) transition
+#: (e.g. ``libasound2`` -> ``libasound2t64``). To stay portable across 22.04 and
+#: 24.04, these are installed best-effort: each is tried, and a package with no
+#: installation candidate on this release is skipped rather than aborting the
+#: deploy. The API + MCP server do not need the browser; only the
+#: browser-backed legal sources do.
+BROWSER_PACKAGES = (
     "libnss3",
     "libnspr4",
-    "libatk1.0-0",
-    "libatk-bridge2.0-0",
-    "libcups2",
+    "libatk1.0-0t64",
+    "libatk-bridge2.0-0t64",
+    "libcups2t64",
     "libdrm2",
     "libxkbcommon0",
     "libxcomposite1",
@@ -60,8 +71,8 @@ SYSTEM_PACKAGES = (
     "libxfixes3",
     "libxrandr2",
     "libgbm1",
-    "libasound2",
-    "libatspi2.0-0",
+    "libasound2t64",
+    "libatspi2.0-0t64",
     "libpango-1.0-0",
     "libcairo2",
 )
@@ -87,16 +98,22 @@ def render_env_file(
     :param owner: ``user`` or ``user:group`` to own the file.
     :param mode: chmod mode string (default ``600``).
     """
+    owner_user = owner.split(":")[0]
     lines = [
         f"# env file written by the legal deploy bootstrap; permissions {mode}",
-        f"install -m {shlex.quote(mode)} -o {shlex.quote(owner.split(':')[0])} "
-        f"/dev/null {shlex.quote(path)}",
+        # Create the file locked down to the owner from the start. The env file
+        # may be written before the service user exists (the bootstrap creates
+        # it), so install as root and chown only if the owner user is present.
+        f"install -m {shlex.quote(mode)} /dev/null {shlex.quote(path)}",
         f"cat > {shlex.quote(path)} <<'LEGAL_ENV_EOF'",
     ]
     for key, value in mapping.items():
         lines.append(f"{key}={value}")
     lines.append("LEGAL_ENV_EOF")
-    lines.append(f"chown {shlex.quote(owner)} {shlex.quote(path)}")
+    lines.append(
+        f"id -u {shlex.quote(owner_user)} >/dev/null 2>&1 && "
+        f"chown {shlex.quote(owner)} {shlex.quote(path)} || true"
+    )
     lines.append(f"chmod {shlex.quote(mode)} {shlex.quote(path)}")
     return "\n".join(lines) + "\n"
 
@@ -208,6 +225,7 @@ def render_bootstrap_script(
     q_env_file = shlex.quote(env_file)
     q_vendor_script = shlex.quote(vendor_script)
     packages = " ".join(shlex.quote(p) for p in SYSTEM_PACKAGES)
+    browser_packages = " ".join(shlex.quote(p) for p in BROWSER_PACKAGES)
 
     # Heredocs that install each systemd unit idempotently.
     unit_blocks: list[str] = []
@@ -238,6 +256,14 @@ echo "[bootstrap] installing system packages"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -y
 apt-get install -y --no-install-recommends {packages}
+
+echo "[bootstrap] installing headless-browser deps (best-effort, per package)"
+# Names differ across Ubuntu releases (the 24.04 t64 transition), so install
+# each browser dep on its own and tolerate any with no installation candidate.
+for pkg in {browser_packages}; do
+  apt-get install -y --no-install-recommends "$pkg" \\
+    || echo "[bootstrap] browser dep '$pkg' unavailable on this release; skipping"
+done
 
 echo "[bootstrap] installing uv"
 if ! command -v uv >/dev/null 2>&1; then
@@ -286,8 +312,13 @@ if [ -f "$APP_DIR/pyproject.toml" ]; then
 fi
 
 echo "[bootstrap] vendoring BotBrowser profiles via legal/scripts/bootstrap.py"
+# BotBrowser assets (and the drone profiles tree) are absent on a clean VPS, so
+# this step is best-effort: the browser/captcha sources will be unavailable, but
+# the API + MCP server (and the non-browser tools the smoke exercises) run fine.
+# Do not let a missing BotBrowser source abort the deploy.
 if [ -f {q_vendor_script} ]; then
-  ( cd "$APP_DIR" && sudo -u "$SERVICE_USER" --preserve-env=HOME env HOME="$(getent passwd "$SERVICE_USER" | cut -d: -f6)" /usr/local/bin/uv run python {q_vendor_script} )
+  ( cd "$APP_DIR" && sudo -u "$SERVICE_USER" --preserve-env=HOME env HOME="$(getent passwd "$SERVICE_USER" | cut -d: -f6)" /usr/local/bin/uv run python {q_vendor_script} ) \
+    || echo "[bootstrap] BotBrowser vendoring skipped (assets unavailable on this host)"
 fi
 
 echo "[bootstrap] installing systemd units"

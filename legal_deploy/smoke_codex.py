@@ -36,6 +36,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -47,6 +48,110 @@ BEARER_TOKEN_ENV_VAR = "LEGAL_MCP_BEARER_TOKEN"
 #: Env var holding the remote MCP URL (used by callers/acceptance, not required
 #: here -- the URL is passed explicitly via ``--server-url``).
 REMOTE_URL_ENV_VAR = "LEGAL_MCP_REMOTE_URL"
+
+#: Env vars from which a bearer token can be auto-minted when none is supplied.
+SIGNING_KEY_ENV_VAR = "LEGAL_MCP_OAUTH_SIGNING_KEY"
+ALLOWED_EMAILS_ENV_VAR = "LEGAL_MCP_ALLOWED_EMAILS"
+ISSUER_ENV_VAR = "LEGAL_MCP_OAUTH_ISSUER"
+
+#: JWT signing algorithm (matches mcp_server.auth.provider).
+_JWT_ALG = "HS256"
+#: TTL (seconds) for an auto-minted smoke token.
+_MINT_TTL_SECONDS = 3600
+
+
+def _local_state_file() -> Path:
+    """Return the deploy state file path (env override or default)."""
+    override = os.environ.get("LEGAL_DEPLOY_STATE_FILE")
+    if override:
+        return Path(override)
+    return Path.home() / ".config" / "legal-agent" / "deploy-state.json"
+
+
+def _load_deploy_state() -> dict[str, Any]:
+    path = _local_state_file()
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def mint_bearer_token(
+    *,
+    signing_key: str,
+    email: str,
+    resource: str,
+    issuer: str,
+    ttl_seconds: int = _MINT_TTL_SECONDS,
+) -> str:
+    """Mint a signed JWT bearer token matching the deployed server's config.
+
+    The claim shape mirrors :class:`mcp_server.auth.provider.SingleUserOAuthProvider`
+    so the deployed server's ``decode_token`` (validating signature, ``aud`` =
+    resource, ``iss`` = issuer, ``exp``, and the email allowlist) accepts it.
+    """
+    import jwt  # local import so the dry-run path needs no jwt
+
+    now = int(time.time())
+    payload = {
+        "sub": email.strip(),
+        "aud": resource,
+        "iss": issuer,
+        "iat": now,
+        "exp": now + ttl_seconds,
+        "scope": "mcp",
+        "email": email.strip(),
+    }
+    return jwt.encode(payload, signing_key, algorithm=_JWT_ALG)
+
+
+def auto_mint_from_state_or_env(server_url: str) -> str | None:
+    """Auto-mint a bearer token from the deploy state file or the environment.
+
+    Resolution order:
+
+    1. Env vars ``LEGAL_MCP_OAUTH_SIGNING_KEY`` + ``LEGAL_MCP_ALLOWED_EMAILS``
+       (issuer/resource derived from env or ``server_url``).
+    2. The local deploy-state.json written by ``legal_deploy.deploy`` (its
+       recorded signing key, allowed email, issuer and resource).
+
+    Returns ``None`` when no signing material is available (the caller then runs
+    without a token, e.g. relying on an out-of-band token).
+    """
+    base = server_url.rstrip("/")
+    derived_issuer = base[: -len("/mcp")] if base.endswith("/mcp") else base
+
+    signing_key = os.environ.get(SIGNING_KEY_ENV_VAR)
+    if signing_key:
+        emails = os.environ.get(ALLOWED_EMAILS_ENV_VAR, "")
+        email = next((e.strip() for e in emails.split(",") if e.strip()), "")
+        if email:
+            issuer = os.environ.get(ISSUER_ENV_VAR) or derived_issuer
+            return mint_bearer_token(
+                signing_key=signing_key,
+                email=email,
+                resource=base,
+                issuer=issuer,
+            )
+
+    state = _load_deploy_state()
+    signing_key = state.get(SIGNING_KEY_ENV_VAR)
+    email = state.get("allowed_email") or state.get(ALLOWED_EMAILS_ENV_VAR)
+    if signing_key and email:
+        email = next((e.strip() for e in str(email).split(",") if e.strip()), "")
+        resource = state.get("oauth_resource") or base
+        issuer = state.get("oauth_issuer") or derived_issuer
+        if email:
+            return mint_bearer_token(
+                signing_key=signing_key,
+                email=email,
+                resource=resource,
+                issuer=issuer,
+            )
+    return None
 
 #: Name of the MCP server entry written into the temporary Codex config.
 MCP_SERVER_NAME = "legal"
@@ -114,25 +219,31 @@ def resolve_bearer_token(arg_token: str | None) -> str | None:
     return None
 
 
+#: Env var name Codex reads the bearer token from for the streamable-HTTP
+#: server. The smoke sets it in the codex subprocess environment.
+CODEX_BEARER_ENV_VAR = "LEGAL_MCP_BEARER_TOKEN"
+
+
 def build_codex_config(server_url: str, bearer_token: str | None) -> dict[str, Any]:
     """Build the Codex MCP server config mapping for ``server_url``.
 
-    Codex addresses a remote streamable-HTTP MCP server by ``url``; the bearer
-    token (when present) is sent as an ``Authorization: Bearer <token>`` header.
-    The returned mapping holds the RAW token -- serialize via
-    :func:`redact_config` for anything reportable.
+    Codex addresses a remote streamable-HTTP MCP server by ``url`` and reads the
+    bearer token from the env var named by ``bearer_token_env_var`` (it does NOT
+    take the raw token inline). The raw token is therefore never written into the
+    config file -- it is passed to the codex subprocess through that env var.
     """
     server: dict[str, Any] = {"url": server_url}
     if bearer_token:
-        server["bearer_token"] = bearer_token
-        server["http_headers"] = {"Authorization": f"Bearer {bearer_token}"}
+        server["bearer_token_env_var"] = CODEX_BEARER_ENV_VAR
     return {"mcp_servers": {MCP_SERVER_NAME: server}}
 
 
 def redact_config(config: dict[str, Any]) -> dict[str, Any]:
-    """Return a deep copy of a Codex config with the bearer token redacted.
+    """Return a deep copy of a Codex config safe to print/log.
 
-    Safe to print/log: the raw token never appears in the result.
+    The Codex config holds no raw token (it references an env var name), so this
+    is effectively a defensive deep copy that still redacts any stray
+    ``bearer_token`` field for backward compatibility.
     """
     servers = config.get("mcp_servers", {})
     out_servers: dict[str, Any] = {}
@@ -143,13 +254,6 @@ def redact_config(config: dict[str, Any]) -> dict[str, Any]:
         safe = dict(server)
         if "bearer_token" in safe:
             safe["bearer_token"] = redact_secret(safe.get("bearer_token"))
-        headers = safe.get("http_headers")
-        if isinstance(headers, dict) and "Authorization" in headers:
-            new_headers = dict(headers)
-            new_headers["Authorization"] = "Bearer " + redact_secret(
-                _strip_bearer(headers["Authorization"])
-            )
-            safe["http_headers"] = new_headers
         out_servers[name] = safe
     return {**config, "mcp_servers": out_servers}
 
@@ -212,18 +316,20 @@ def _toml_key(key: str) -> str:
 def _codex_commands(codex_bin: str, config_path: str) -> list[list[str]]:
     """Return the codex commands run for each smoke step.
 
-    Each step runs ``codex exec`` non-interactively with the temp config so the
-    smoke is fully scripted (no TTY). The config carries the MCP server wiring.
+    Each step runs ``codex exec`` non-interactively (no TTY). The MCP server
+    wiring is supplied through ``CODEX_HOME`` (a temp dir holding
+    ``config.toml``), set in the subprocess environment by :func:`run_smoke`;
+    the bearer token is supplied through the ``LEGAL_MCP_BEARER_TOKEN`` env var
+    the config references. ``config_path`` is retained only for plan display.
     """
     commands: list[list[str]] = []
     for step in SMOKE_STEPS:
         commands.append(
             [
                 codex_bin,
-                "--config",
-                config_path,
                 "exec",
                 "--skip-git-repo-check",
+                "--dangerously-bypass-approvals-and-sandbox",
                 step["prompt"],
             ]
         )
@@ -259,7 +365,9 @@ def _plan(
     }
 
 
-def _run_step(argv: Sequence[str], *, timeout: float) -> dict[str, Any]:
+def _run_step(
+    argv: Sequence[str], *, timeout: float, env: dict[str, str] | None = None
+) -> dict[str, Any]:
     """Run one codex command, capturing stdout/stderr and the exit code."""
     try:
         completed = subprocess.run(
@@ -268,6 +376,7 @@ def _run_step(argv: Sequence[str], *, timeout: float) -> dict[str, Any]:
             text=True,
             timeout=timeout,
             check=False,
+            env=env,
         )
     except FileNotFoundError as exc:
         return {
@@ -293,6 +402,25 @@ def _run_step(argv: Sequence[str], *, timeout: float) -> dict[str, Any]:
     }
 
 
+def _seed_codex_auth(codex_home: str) -> None:
+    """Copy the user's codex auth into a temp CODEX_HOME, if present.
+
+    ``codex exec`` needs login credentials (``auth.json``) to run the model.
+    The smoke uses a temp CODEX_HOME for the MCP config, so copy the real
+    ``~/.codex/auth.json`` over when available. Absence is non-fatal: codex will
+    report an auth error the caller can act on.
+    """
+    src = Path(os.environ.get("CODEX_HOME", Path.home() / ".codex")) / "auth.json"
+    if src.exists():
+        import shutil
+
+        try:
+            shutil.copy2(src, Path(codex_home) / "auth.json")
+            os.chmod(Path(codex_home) / "auth.json", 0o600)
+        except OSError:
+            pass
+
+
 def run_smoke(
     *,
     server_url: str,
@@ -311,33 +439,49 @@ def run_smoke(
     safe_config = redact_config(config)
     config_toml = render_config_toml(config)
 
-    tmp_dir = tempfile.mkdtemp(prefix="legal-smoke-codex-")
-    config_path = str(Path(tmp_dir) / "config.toml")
+    # Codex reads its MCP servers from ``$CODEX_HOME/config.toml``. Use a temp
+    # CODEX_HOME so the smoke does not mutate the user's real config, but copy
+    # the user's ``auth.json`` (ChatGPT/login credentials) into it so codex can
+    # actually run the model. The bearer token is passed via the env var the
+    # config references, never written to disk.
+    codex_home = tempfile.mkdtemp(prefix="legal-smoke-codex-")
+    config_path = str(Path(codex_home) / "config.toml")
     Path(config_path).write_text(config_toml, encoding="utf-8")
     try:
         os.chmod(config_path, 0o600)
     except OSError:
         pass
+    _seed_codex_auth(codex_home)
+
+    child_env = dict(os.environ)
+    child_env["CODEX_HOME"] = codex_home
+    if bearer_token:
+        child_env[CODEX_BEARER_ENV_VAR] = bearer_token
 
     results: list[dict[str, Any]] = []
     all_ok = True
     try:
         for step, argv in zip(SMOKE_STEPS, _codex_commands(codex_bin, config_path)):
-            step_result = _run_step(argv, timeout=timeout)
+            step_result = _run_step(argv, timeout=timeout, env=child_env)
             step_result["step"] = step["id"]
             step_result["description"] = step["description"]
+            # Redact any stray token occurrence in captured output.
+            if bearer_token:
+                for key in ("stdout", "stderr"):
+                    if isinstance(step_result.get(key), str) and bearer_token in step_result[key]:
+                        step_result[key] = step_result[key].replace(
+                            bearer_token, "<redacted-bearer-token>"
+                        )
             results.append(step_result)
             if not step_result.get("ok", False):
                 all_ok = False
                 # Stop on first failure: later steps depend on the connection.
                 break
     finally:
-        # Best-effort cleanup of the temp config (it holds the raw token).
-        try:
-            Path(config_path).unlink(missing_ok=True)
-            os.rmdir(tmp_dir)
-        except OSError:
-            pass
+        # Best-effort cleanup of the temp CODEX_HOME (it holds copied auth).
+        import shutil
+
+        shutil.rmtree(codex_home, ignore_errors=True)
 
     envelope: dict[str, Any] = {
         "ok": all_ok,
@@ -420,6 +564,14 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--no-auto-mint",
+        action="store_true",
+        help=(
+            "Do not auto-mint a bearer token from the deploy state file / "
+            "signing env vars when none is supplied."
+        ),
+    )
+    parser.add_argument(
         "--codex-bin",
         default=DEFAULT_CODEX_BIN,
         help=f"Codex CLI executable (default: {DEFAULT_CODEX_BIN}).",
@@ -485,6 +637,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     # --dry-run resolves the token only to compute a redacted preview; it never
     # requires one and never contacts the network or codex.
     bearer_token = resolve_bearer_token(args.bearer_token)
+    # When no explicit token is given, auto-mint one from the deploy state file
+    # or signing env vars so the orchestrator's acceptance does not need to mint
+    # a token by hand. (Dry-run also benefits: it shows a real token shape.)
+    if not bearer_token and not getattr(args, "no_auto_mint", False):
+        try:
+            bearer_token = auto_mint_from_state_or_env(server_url)
+        except Exception:  # minting is best-effort; fall back to anonymous
+            bearer_token = None
 
     if args.dry_run:
         # In dry-run we never write a real file; show a representative path.

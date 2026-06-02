@@ -27,7 +27,7 @@ from legal.errors import LegalCliError
 from api.errors import error_to_envelope
 from api.routers import csjn, discovery, generic, saij, search
 from mcp_server.auth.routes import build_oauth_routes
-from mcp_server.main import build_mcp_asgi_app
+from mcp_server.main import build_mcp_asgi_components, mcp_lifespan
 
 DESCRIPTION = (
     "Uniform HTTP access to Argentina legal research data sources. Every "
@@ -40,10 +40,18 @@ DESCRIPTION = (
 
 def create_app() -> FastAPI:
     """Build and return the FastAPI application."""
+    # Build the MCP transport up front so its lifespan can be wired into the
+    # app's lifespan. Mounting an ASGI sub-app does NOT run its lifespan, and
+    # the MCP streamable transport starts its session-manager task group there;
+    # without this the first ``/mcp`` request raises ``RuntimeError: Task group
+    # is not initialized``.
+    mcp_app, mcp_inner = build_mcp_asgi_components()
+
     app = FastAPI(
         title="Legal Data API",
         version="0.1.0",
         description=DESCRIPTION,
+        lifespan=mcp_lifespan(mcp_inner),
     )
 
     @app.exception_handler(LegalCliError)
@@ -77,9 +85,9 @@ def create_app() -> FastAPI:
 
     # MCP streamable-HTTP transport, bearer-protected by the wrapping
     # middleware. Mounting at ``/mcp`` lands the transport's root endpoint
-    # exactly at ``/mcp``; Starlette runs the mounted app's lifespan (the MCP
-    # session manager) alongside the API's.
-    app.mount("/mcp", build_mcp_asgi_app())
+    # exactly at ``/mcp``. The transport's lifespan (session manager) is run via
+    # the app-level ``lifespan=mcp_lifespan(mcp_inner)`` set above.
+    app.mount("/mcp", mcp_app)
 
     return app
 

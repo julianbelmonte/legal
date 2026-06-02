@@ -1,10 +1,19 @@
 """HTTP client for the Cloudzy Developer API.
 
 The Cloudzy Developer API is rooted at ``/developers`` and authenticates with an
-``API-Token`` header. Responses wrap their payload with a ``status`` field that
-is either ``"OKAY"`` or ``"FAILED"``; this client normalizes that envelope,
-returning the inner ``data`` payload on success and raising :class:`CloudzyError`
-on failure.
+``API-Token`` header. The concrete v1 resources live under ``/developers/v1/*``
+(``/v1/regions``, ``/v1/products``, ``/v1/os``, ``/v1/ssh-keys``,
+``/v1/instances``). Successful responses wrap their payload as
+``{"code": "OKAY", "detail": <message>, "data": <payload>}``; this client
+normalizes that envelope, returning the inner ``data`` payload on success and
+raising :class:`CloudzyError` on failure.
+
+The request/response field names here match the live Cloudzy Developer API
+OpenAPI schema (validated against ``/developers/openapi.json``): create-instance
+takes ``hostnames`` (array), ``productId``, ``osId``/``osName``, ``sshKeyIds``
+(integers), ``region``, ``appId`` and ``billingCycle``; ``products`` requires a
+``regionId`` query param; operating systems are at ``/v1/os`` with the list under
+``data.os``; ssh keys are under ``data.sshKeys``.
 
 This module is standalone deploy tooling. It uses ``httpx`` directly and does not
 import from the legal pipeline's source-access internals.
@@ -20,17 +29,26 @@ from typing import Any
 import httpx
 
 DEFAULT_BASE_URL = "https://api.cloudzy.com/developers"
+#: The live v1 resources live under ``/developers/v1/*``.
+API_PREFIX = "/v1"
 DEFAULT_TIMEOUT = 30.0
 TOKEN_ENV_VAR = "CLOUDZY_API_TOKEN"
 
-#: Cloudzy status sentinels in the response envelope.
+#: Cloudzy result sentinels. The live API reports the result of a call in the
+#: ``code`` field of the envelope (``OKAY`` on a read, ``CREATED`` on a create).
+#: ``status`` is accepted too for forward/backward compatibility.
 STATUS_OKAY = "OKAY"
 STATUS_FAILED = "FAILED"
+#: Result codes that indicate success (the inner ``data`` should be returned).
+SUCCESS_CODES = {"OKAY", "CREATED", "ACCEPTED"}
 
 # Instance lifecycle states that count as "ready" when polling for readiness.
-READY_STATES = {"RUNNING", "ACTIVE", "OKAY", "READY"}
+# The live API reports instance state in the ``status`` field; an instance that
+# finished provisioning reports ``running``/``active``. Comparison is
+# case-insensitive (see ``_instance_state`` callers).
+READY_STATES = {"RUNNING", "ACTIVE", "OKAY", "READY", "ONLINE", "POWERON"}
 # Terminal failure states that should stop a readiness poll early.
-FAILED_STATES = {"FAILED", "ERROR", "TERMINATED"}
+FAILED_STATES = {"FAILED", "ERROR", "TERMINATED", "DELETED"}
 
 
 class CloudzyError(RuntimeError):
@@ -54,7 +72,15 @@ class CloudzyTimeoutError(CloudzyError):
 
 @dataclass
 class CreateInstanceRequest:
-    """Typed payload for :meth:`CloudzyClient.create_instance`."""
+    """Typed payload for :meth:`CloudzyClient.create_instance`.
+
+    Field names follow the deploy-facing convention (``product``,
+    ``operating_system``, ``hostname``, ``ssh_keys``); :meth:`to_payload`
+    translates them to the live Cloudzy API names (``productId``, ``osId``,
+    ``hostnames``, ``sshKeyIds``). ``region`` and at least one hostname are
+    required by the API. ``ssh_keys`` are Cloudzy SSH key **ids** (integers) and
+    are coerced to ints in the payload.
+    """
 
     region: str
     product: str
@@ -63,25 +89,43 @@ class CreateInstanceRequest:
     hostname: str | None = None
     ssh_keys: list[str] = field(default_factory=list)
     label: str | None = None
+    billing_cycle: str = "hourly"
+    #: The API rejects a create with neither IPv4 nor IPv6 selected
+    #: (``ONE_OF_IPV4_OR_IPV6_MUST_BE_SELECTED``); default to IPv4.
+    assign_ipv4: bool = True
+    assign_ipv6: bool = False
     extra: dict[str, Any] = field(default_factory=dict)
 
     def to_payload(self) -> dict[str, Any]:
+        # The API requires at least one hostname; default to the instance label
+        # or a stable fallback so a request is always well-formed.
+        hostname = self.hostname or self.label or "legal-agent"
         payload: dict[str, Any] = {
             "region": self.region,
-            "product": self.product,
+            "hostnames": [hostname],
+            "billingCycle": self.billing_cycle,
+            "assignIpv4": self.assign_ipv4,
+            "assignIpv6": self.assign_ipv6,
         }
+        if self.product:
+            payload["productId"] = self.product
         if self.operating_system is not None:
-            payload["operatingSystem"] = self.operating_system
+            payload["osId"] = self.operating_system
         if self.application is not None:
-            payload["application"] = self.application
-        if self.hostname is not None:
-            payload["hostname"] = self.hostname
+            payload["appId"] = self.application
         if self.ssh_keys:
-            payload["sshKeys"] = list(self.ssh_keys)
-        if self.label is not None:
-            payload["label"] = self.label
+            payload["sshKeyIds"] = [_as_ssh_key_id(k) for k in self.ssh_keys]
         payload.update(self.extra)
         return payload
+
+
+def _as_ssh_key_id(value: Any) -> Any:
+    """Coerce an SSH key id to int when it looks numeric (the API wants ints)."""
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and value.strip().isdigit():
+        return int(value.strip())
+    return value
 
 
 class CloudzyClient:
@@ -184,28 +228,30 @@ class CloudzyClient:
     # -- read operations -------------------------------------------------
 
     def list_regions(self) -> Any:
-        return self._request("GET", "/regions")
+        return self._request("GET", f"{API_PREFIX}/regions")
 
-    def list_products(self) -> Any:
-        return self._request("GET", "/products")
+    def list_products(self, region_id: str | None = None) -> Any:
+        # The live API requires a ``regionId`` query param to list products.
+        params = {"regionId": region_id} if region_id else None
+        return self._request("GET", f"{API_PREFIX}/products", params=params)
 
     def list_operating_systems(self) -> Any:
-        return self._request("GET", "/operating-systems")
+        return self._request("GET", f"{API_PREFIX}/os")
 
     #: Alias used by some deploy steps.
     list_os_images = list_operating_systems
 
     def list_applications(self) -> Any:
-        return self._request("GET", "/applications")
+        return self._request("GET", f"{API_PREFIX}/applications")
 
     def list_ssh_keys(self) -> Any:
-        return self._request("GET", "/ssh-keys")
+        return self._request("GET", f"{API_PREFIX}/ssh-keys")
 
     def list_instances(self) -> Any:
-        return self._request("GET", "/instances")
+        return self._request("GET", f"{API_PREFIX}/instances")
 
     def get_instance(self, instance_id: str) -> Any:
-        return self._request("GET", f"/instances/{instance_id}")
+        return self._request("GET", f"{API_PREFIX}/instances/{instance_id}")
 
     # -- write operations ------------------------------------------------
 
@@ -219,10 +265,12 @@ class CloudzyClient:
             request = CreateInstanceRequest(**kwargs)
         elif kwargs:
             raise CloudzyError("pass either a request object or kwargs, not both")
-        return self._request("POST", "/instances", json=request.to_payload())
+        return self._request(
+            "POST", f"{API_PREFIX}/instances", json=request.to_payload()
+        )
 
     def destroy_instance(self, instance_id: str) -> Any:
-        return self._request("DELETE", f"/instances/{instance_id}")
+        return self._request("DELETE", f"{API_PREFIX}/instances/{instance_id}")
 
     # -- readiness -------------------------------------------------------
 
@@ -266,19 +314,26 @@ def _safe_json(response: httpx.Response) -> Any:
 
 
 def _normalize_envelope(body: Any) -> Any:
-    """Normalize a Cloudzy OKAY/FAILED envelope to its data payload.
+    """Normalize a Cloudzy result envelope to its data payload.
 
-    On ``OKAY`` returns the ``data`` payload (or the full body when no ``data``
-    key is present). On ``FAILED`` raises :class:`CloudzyError`. Bodies without a
-    recognized ``status`` field are returned unchanged.
+    The live API reports the result in ``code`` (``"OKAY"`` on success); older
+    shapes used ``status``. On success returns the ``data`` payload (or the full
+    body when no ``data`` key is present). On an explicit failure code raises
+    :class:`CloudzyError`. Bodies without a recognized result field are returned
+    unchanged.
     """
     if not isinstance(body, dict):
         return body
-    status = body.get("status")
-    if status == STATUS_FAILED:
-        message = body.get("message") or body.get("error") or "Cloudzy request failed"
+    result = body.get("code", body.get("status"))
+    if result == STATUS_FAILED:
+        message = (
+            body.get("detail")
+            or body.get("message")
+            or body.get("error")
+            or "Cloudzy request failed"
+        )
         raise CloudzyError(str(message), payload=body)
-    if status == STATUS_OKAY:
+    if result in SUCCESS_CODES:
         return body.get("data", body)
     return body
 
@@ -291,3 +346,33 @@ def _instance_state(data: Any) -> str | None:
         if isinstance(value, str):
             return value
     return None
+
+
+def _find_instance_id(node: Any) -> str | None:
+    """Recursively find an instance id in a (possibly nested) create response.
+
+    The live create-instance response nests the created instance(s) under
+    ``data.instances`` and each entry may itself be a ``{code, detail, data}``
+    envelope. This walks dicts/lists and returns the first plausible instance
+    id (a UUID-shaped ``id``/``instanceId``).
+    """
+    if isinstance(node, dict):
+        for key in ("id", "instanceId", "instance_id", "uuid"):
+            value = node.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        for value in node.values():
+            found = _find_instance_id(value)
+            if found:
+                return found
+    elif isinstance(node, list):
+        for item in node:
+            found = _find_instance_id(item)
+            if found:
+                return found
+    return None
+
+
+def created_instance_id(create_data: Any) -> str | None:
+    """Return the created instance id from a create-instance ``data`` payload."""
+    return _find_instance_id(create_data)

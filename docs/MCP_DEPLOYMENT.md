@@ -285,3 +285,57 @@ python -m legal_deploy.cloudzy_cli destroy <instance_id>
 After a destroy, the deploy state file is cleared, so the next deploy provisions
 a fresh instance. Remember to remove the connector from Claude Cowork once the
 endpoint is gone.
+
+---
+
+## 12. Last validated deployment
+
+A real end-to-end deployment was validated against a live Cloudzy VPS + ngrok
+tunnel and a Codex CLI MCP smoke. The ngrok URL below is a temporary, public
+free-tier tunnel (it rotates whenever the ngrok service restarts) — it is safe
+to record and carries no secret.
+
+- **MCP URL:** `https://jubilant-willpower-unthawed.ngrok-free.dev/mcp`
+- **VPS:** Cloudzy `US-Las-Vegas`, Ubuntu Server 24.04 LTS, 4 GB / 2 vCPU plan.
+- **Surfaces verified:** `/healthz` → 200; both OAuth metadata documents
+  (`/.well-known/oauth-protected-resource` with `resource` ending in `/mcp`, and
+  `/.well-known/oauth-authorization-server` with issuer/authorize/token/register
+  endpoints derived from the tunnel base); unauthenticated `/mcp` → `401` with a
+  RFC 9728 `WWW-Authenticate: Bearer` challenge; authenticated `/mcp` MCP
+  `initialize` → `200`.
+- **Codex CLI smoke:** passed — `codex` listed all 8 MCP tools, called
+  `legal_sources` (returned all 18 wired source ids), and ran a small
+  `legal_search` that completed with `ok: true`.
+
+### Minting a bearer token / running the smoke
+
+The single-user smoke does not need a browser OAuth flow — it mints a signed JWT
+bearer token directly from the deployed server's signing config. The deploy
+writes that config (signing key, allowed email, issuer = tunnel base, resource =
+`<tunnel>/mcp`) into the local, `0600` deploy state file
+(`~/.config/legal-agent/deploy-state.json`).
+
+`legal_deploy.smoke_codex` **auto-mints** a token when none is supplied, so the
+smoke just needs the URL:
+
+```bash
+# Auto-mints from the deploy state file (no token needed):
+uv run python -m legal_deploy.smoke_codex \
+  --server-url https://<tunnel-host>/mcp
+
+# Or set the remote URL via env and run with no flags:
+export LEGAL_MCP_REMOTE_URL=https://<tunnel-host>/mcp
+uv run python -m legal_deploy.smoke_codex --server-url "$LEGAL_MCP_REMOTE_URL"
+```
+
+Token resolution order in `smoke_codex`:
+
+1. `--bearer-token` flag, then `LEGAL_MCP_BEARER_TOKEN` env var.
+2. Auto-mint from `LEGAL_MCP_OAUTH_SIGNING_KEY` + `LEGAL_MCP_ALLOWED_EMAILS`
+   env vars (issuer/resource derived from `--server-url` or
+   `LEGAL_MCP_OAUTH_ISSUER`).
+3. Auto-mint from the deploy state file's recorded signing config.
+
+Pass `--no-auto-mint` to force the anonymous path. The minted token is passed to
+`codex` via the `LEGAL_MCP_BEARER_TOKEN` env var (referenced from a temporary
+`CODEX_HOME/config.toml`); the raw token is never written to disk or printed.

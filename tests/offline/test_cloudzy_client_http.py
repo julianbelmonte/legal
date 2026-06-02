@@ -72,7 +72,7 @@ def test_get_request_carries_method_url_and_auth_header():
         data = client.list_regions()
 
     assert seen["method"] == "GET"
-    assert seen["path"] == "/developers/regions"
+    assert seen["path"] == "/developers/v1/regions"
     assert seen["token"] == DUMMY_TOKEN
     assert seen["accept"] == "application/json"
     assert data == [{"id": "r1"}]
@@ -88,18 +88,24 @@ def test_create_instance_posts_payload():
         return httpx.Response(200, json={"status": "OKAY", "data": {"id": "i-1"}})
 
     request = CreateInstanceRequest(
-        region="us-east",
-        product="vps-1",
-        ssh_keys=["k1"],
+        region="US-Las-Vegas",
+        product="prod-uuid",
+        operating_system="os-id",
+        ssh_keys=["12362"],
         hostname="legal-agent",
     )
     with _client(handler) as client:
         data = client.create_instance(request)
 
     assert seen["method"] == "POST"
-    assert seen["path"] == "/developers/instances"
+    assert seen["path"] == "/developers/v1/instances"
+    # The live API uses these field names; ssh key ids are coerced to ints.
     assert '"region"' in seen["body"]
-    assert '"sshKeys"' in seen["body"]
+    assert '"hostnames"' in seen["body"]
+    assert '"productId"' in seen["body"]
+    assert '"osId"' in seen["body"]
+    assert '"sshKeyIds"' in seen["body"]
+    assert "[12362]" in seen["body"].replace(" ", "")
     assert data == {"id": "i-1"}
 
 
@@ -115,7 +121,7 @@ def test_destroy_instance_uses_delete():
         data = client.destroy_instance("i-42")
 
     assert seen["method"] == "DELETE"
-    assert seen["path"] == "/developers/instances/i-42"
+    assert seen["path"] == "/developers/v1/instances/i-42"
     assert data == {"deleted": True}
 
 

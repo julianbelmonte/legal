@@ -31,6 +31,8 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import secrets as _secrets_mod
+import shlex
 import socket
 import subprocess
 import sys
@@ -51,7 +53,9 @@ from legal_deploy.cloudzy import (
     CloudzyError,
     CloudzyTimeoutError,
     CreateInstanceRequest,
+    created_instance_id,
 )
+from legal_deploy.ngrok import oauth_env_updates
 from legal_deploy.secrets import (
     CLOUDZY_TOKEN_KEY,
     NGROK_AUTHTOKEN_ENV_VAR,
@@ -59,6 +63,17 @@ from legal_deploy.secrets import (
     load_deploy_secrets,
     redact_secret,
 )
+
+# --- MCP / OAuth env keys written to the remote env file --------------------
+
+MCP_SIGNING_KEY = "LEGAL_MCP_OAUTH_SIGNING_KEY"
+MCP_LOGIN_SECRET = "LEGAL_MCP_OAUTH_LOGIN_SECRET"
+MCP_ALLOWED_EMAILS = "LEGAL_MCP_ALLOWED_EMAILS"
+MCP_AUTH_ENABLED = "LEGAL_MCP_AUTH_ENABLED"
+API_KEY_ENV = "LEGAL_API_KEY"
+
+#: Default allowed email for the single-user MCP login.
+DEFAULT_ALLOWED_EMAIL = "ayacuchovictor@gmail.com"
 
 # -- defaults ----------------------------------------------------------------
 
@@ -69,9 +84,14 @@ DEFAULT_SERVICE_USER = "legal"
 #: Remote env file loaded by the app systemd unit (chmod 600).
 DEFAULT_REMOTE_ENV_FILE = str(PurePosixPath(DEFAULT_APP_DIR) / ".env")
 
-#: Default Cloudzy provisioning selectors (overridable on the CLI).
-DEFAULT_REGION = "us-east"
-DEFAULT_PRODUCT = "vps-1"
+#: Default Cloudzy provisioning selectors (overridable on the CLI). These are
+#: validated live IDs from the Cloudzy Developer API: a US-Las-Vegas region, a
+#: 4 GB / 2 vCPU default plan (enough headroom for uv sync + BotBrowser vendor),
+#: and the Ubuntu Server 24.04 LTS image. Discover current IDs with
+#: ``python -m legal_deploy.cloudzy_cli regions|products|os``.
+DEFAULT_REGION = "US-Las-Vegas"
+DEFAULT_PRODUCT = "2d798f98-d0e1-4b78-ba5c-663b2212bfb8"
+DEFAULT_OS = "4700a1df2452ce24d8349625ba8b45d4bd1c54e60ad06ff879bce048935d57ff"
 DEFAULT_HOSTNAME = "legal-agent"
 DEFAULT_SSH_USER = "root"
 
@@ -341,6 +361,59 @@ def _sync_repo(ip: str, *, user: str, app_dir: str, key_path: str | None) -> Non
 # -- deploy flow -------------------------------------------------------------
 
 
+def _build_mcp_env(
+    secrets: Any,
+    *,
+    allowed_email: str,
+    reuse: dict[str, Any] | None = None,
+) -> dict[str, str]:
+    """Build the remote env mapping (secrets + MCP/OAuth config).
+
+    Generates strong OAuth signing/login secrets and a ``LEGAL_API_KEY`` the
+    first time, reusing values recorded in ``reuse`` (the prior deploy state) on
+    a redeploy so issued tokens stay valid. The public URL / issuer are set
+    later, once the ngrok tunnel is discovered.
+    """
+    reuse = reuse or {}
+    env: dict[str, str] = {}
+    if secrets.cloudzy_api_token:
+        env[CLOUDZY_TOKEN_KEY] = secrets.cloudzy_api_token
+    for key, value in secrets.extra.items():
+        if value:
+            env[key] = value
+
+    env[MCP_AUTH_ENABLED] = "true"
+    env[MCP_ALLOWED_EMAILS] = allowed_email
+    env[MCP_SIGNING_KEY] = reuse.get(MCP_SIGNING_KEY) or _secrets_mod.token_urlsafe(48)
+    env[MCP_LOGIN_SECRET] = (
+        reuse.get(MCP_LOGIN_SECRET) or _secrets_mod.token_urlsafe(24)
+    )
+    env[API_KEY_ENV] = reuse.get(API_KEY_ENV) or _secrets_mod.token_urlsafe(24)
+    return env
+
+
+def _append_remote_env(client_ssh: Any, env_file: str, updates: dict[str, str]) -> None:
+    """Append ``KEY=VALUE`` updates to the remote env file (idempotent-ish).
+
+    Replaces any existing line for each key, then appends the new value, keeping
+    the file at chmod 600. Values are single-quoted for the shell heredoc.
+    """
+    if not updates:
+        return
+    q_file = shlex.quote(env_file)
+    lines = [f"touch {q_file}", f"chmod 600 {q_file}"]
+    for key, value in updates.items():
+        # Drop any prior definition, then append the new one.
+        lines.append(f"sed -i {shlex.quote(f'/^{key}=/d')} {q_file}")
+        lines.append(f"printf '%s\\n' {shlex.quote(f'{key}={value}')} >> {q_file}")
+    script = "\n".join(lines)
+    code, _out, err = _run_remote(
+        client_ssh, f"bash -s <<'LEGAL_DEPLOY_ENVUP_EOF'\n{script}\nLEGAL_DEPLOY_ENVUP_EOF"
+    )
+    if code != 0:
+        raise DeployError(f"remote env update failed (exit {code}): {err.strip()}")
+
+
 def run_deploy(args: argparse.Namespace) -> dict[str, Any]:
     """Execute the full deploy flow and return a JSON-safe result envelope."""
     secrets = _load_secrets(args, require=True)
@@ -362,7 +435,10 @@ def run_deploy(args: argparse.Namespace) -> dict[str, Any]:
                 label=args.label,
             )
             instance = client.create_instance(request)
-            instance_id = _instance_id(instance)
+            # The create response nests created instances under
+            # ``data.instances`` (each possibly an envelope), so search deeply
+            # for the id rather than expecting a flat shape.
+            instance_id = created_instance_id(instance) or _instance_id(instance)
             if instance_id is None:
                 raise DeployError("could not determine instance id after provision")
 
@@ -383,13 +459,16 @@ def run_deploy(args: argparse.Namespace) -> dict[str, Any]:
         PurePosixPath(args.app_dir) / ".env"
     )
 
-    # Render the env file content from the secret loader. Only non-empty values.
-    env_mapping: dict[str, str] = {}
-    if secrets.cloudzy_api_token:
-        env_mapping[CLOUDZY_TOKEN_KEY] = secrets.cloudzy_api_token
-    for key, value in secrets.extra.items():
-        if value:
-            env_mapping[key] = value
+    allowed_email = getattr(args, "allowed_email", None) or DEFAULT_ALLOWED_EMAIL
+    # Build the full remote env: deploy secrets + MCP/OAuth config. Reuse the
+    # signing key / login secret / API key from prior state on a redeploy so any
+    # already-issued bearer token keeps validating.
+    env_mapping = _build_mcp_env(
+        secrets, allowed_email=allowed_email, reuse=state
+    )
+    # Persist the OAuth signing config locally so smoke_codex / the orchestrator
+    # can mint a bearer token without a browser flow.
+    signing_key = env_mapping[MCP_SIGNING_KEY]
 
     bootstrap_script = render_bootstrap_script(
         app_dir=args.app_dir,
@@ -415,36 +494,70 @@ def run_deploy(args: argparse.Namespace) -> dict[str, Any]:
             app_dir=args.app_dir,
             key_path=args.ssh_key_file,
         )
-        # Write env file (chmod 600) then run bootstrap.
-        for label, script in (("env-file", env_snippet), ("bootstrap", bootstrap_script)):
-            code, out, err = _run_remote(client_ssh, f"bash -s <<'LEGAL_DEPLOY_EOF'\n{script}\nLEGAL_DEPLOY_EOF")
-            if code != 0:
-                raise DeployError(f"remote {label} step failed (exit {code}): {err.strip()}")
 
-        # If ngrok needs an authtoken, configure it from the loader.
+        # Write env file (chmod 600) then run bootstrap (installs deps incl.
+        # ngrok + uv, uv sync, vendors BotBrowser, installs + starts the systemd
+        # services).
+        for label, script in (
+            ("env-file", env_snippet),
+            ("bootstrap", bootstrap_script),
+        ):
+            code, out, err = _run_remote(
+                client_ssh,
+                f"bash -s <<'LEGAL_DEPLOY_EOF'\n{script}\nLEGAL_DEPLOY_EOF",
+            )
+            if code != 0:
+                raise DeployError(
+                    f"remote {label} step failed (exit {code}): {err.strip()[:800]}"
+                )
+
+        # Configure ngrok's authtoken AFTER bootstrap has installed ngrok. The
+        # ngrok systemd unit runs as the service user, so the authtoken must
+        # live in THAT user's ngrok config; then restart the unit so the tunnel
+        # authenticates. The token never appears in logged output.
         if secrets.ngrok_authtoken:
+            home = f"/home/{args.service_user}"
             _run_remote(
                 client_ssh,
-                f"ngrok config add-authtoken {secrets.ngrok_authtoken} || true",
+                "sudo -u {u} env HOME={h} ngrok config add-authtoken {t} "
+                "|| ngrok config add-authtoken {t} || true".format(
+                    u=shlex.quote(args.service_user),
+                    h=shlex.quote(home),
+                    t=shlex.quote(secrets.ngrok_authtoken),
+                ),
+            )
+            _run_remote(
+                client_ssh,
+                f"systemctl restart {NGROK_SERVICE_NAME}.service || true",
             )
 
-        # Verify health.
+        # Discover the ngrok public URL from the local agent API, retrying while
+        # the tunnel comes up.
+        ngrok_url = _discover_ngrok_url(client_ssh)
+
+        # Point the runtime OAuth metadata / MCP public URL at the tunnel, then
+        # restart the app so the new env takes effect.
+        if ngrok_url:
+            _append_remote_env(
+                client_ssh, remote_env_file, oauth_env_updates(ngrok_url)
+            )
+            _run_remote(
+                client_ssh,
+                f"systemctl restart {APP_SERVICE_NAME}.service || true",
+            )
+            time.sleep(5)
+
+        # Verify health (after restart).
         code, out, _ = _run_remote(
             client_ssh,
             f"curl -fsS http://127.0.0.1:{args.app_port}/healthz || true",
         )
         api_health = {"reachable": code == 0, "body": out.strip()[:500]}
-
-        # Discover the ngrok public URL from the local agent API.
-        code, out, _ = _run_remote(
-            client_ssh,
-            "curl -fsS http://127.0.0.1:4040/api/tunnels || true",
-        )
-        ngrok_url = _parse_ngrok_url(out)
     finally:
         client_ssh.close()
 
     mcp_url = f"{ngrok_url}/mcp" if ngrok_url else None
+    issuer = oauth_env_updates(ngrok_url)["LEGAL_MCP_OAUTH_ISSUER"] if ngrok_url else None
 
     new_state = {
         "instance_id": instance_id,
@@ -456,6 +569,15 @@ def run_deploy(args: argparse.Namespace) -> dict[str, Any]:
         "ngrok_url": ngrok_url,
         "mcp_url": mcp_url,
         "ssh_user": args.ssh_user,
+        "allowed_email": allowed_email,
+        # OAuth config needed to mint a bearer token for the smoke. The state
+        # file is written chmod 600 (local secret), same posture as deploy.env.
+        MCP_SIGNING_KEY: signing_key,
+        MCP_ALLOWED_EMAILS: allowed_email,
+        MCP_LOGIN_SECRET: env_mapping[MCP_LOGIN_SECRET],
+        API_KEY_ENV: env_mapping[API_KEY_ENV],
+        "oauth_issuer": issuer,
+        "oauth_resource": mcp_url,
     }
     state_path = save_state(new_state, args.state_file)
 
@@ -471,6 +593,22 @@ def run_deploy(args: argparse.Namespace) -> dict[str, Any]:
         "secrets": secrets.diagnostics(),
         "next_steps": _next_steps(ip, ngrok_url, mcp_url),
     }
+
+
+def _discover_ngrok_url(
+    client_ssh: Any, *, attempts: int = 30, interval: float = 5.0
+) -> str | None:
+    """Poll the remote ngrok agent API for the public https tunnel URL."""
+    for _ in range(attempts):
+        code, out, _ = _run_remote(
+            client_ssh,
+            "curl -fsS http://127.0.0.1:4040/api/tunnels || true",
+        )
+        url = _parse_ngrok_url(out)
+        if url:
+            return url
+        time.sleep(interval)
+    return None
 
 
 def _parse_ngrok_url(body: str) -> str | None:
@@ -553,6 +691,11 @@ def _error_envelope(command: str, exc: Exception) -> dict[str, Any]:
     status_code = getattr(exc, "status_code", None)
     if status_code is not None:
         details["status_code"] = status_code
+    # Cloudzy error payloads carry no secrets (validation detail/codes), so
+    # surfacing them aids diagnosis of a failed provision.
+    payload = getattr(exc, "payload", None)
+    if payload is not None:
+        details["payload"] = payload
 
     return {
         "ok": False,
@@ -700,7 +843,9 @@ def build_parser() -> argparse.ArgumentParser:
     deploy.add_argument(
         "--product", default=DEFAULT_PRODUCT, help="Cloudzy product/plan id."
     )
-    deploy.add_argument("--os", default=None, help="Operating system image id.")
+    deploy.add_argument(
+        "--os", default=DEFAULT_OS, help="Operating system image id."
+    )
     deploy.add_argument(
         "--hostname", default=DEFAULT_HOSTNAME, help="Instance hostname."
     )
@@ -711,6 +856,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Cloudzy SSH key id to attach (repeatable).",
     )
     deploy.add_argument("--label", default=None, help="Instance label.")
+    deploy.add_argument(
+        "--allowed-email",
+        default=DEFAULT_ALLOWED_EMAIL,
+        help=(
+            "Email permitted to authenticate to the MCP server "
+            f"(default: {DEFAULT_ALLOWED_EMAIL})."
+        ),
+    )
     deploy.add_argument(
         "--timeout",
         type=float,
