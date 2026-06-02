@@ -16,6 +16,13 @@ its own — full fetch + extraction wiring lands in later steps (10-13).
 
 from __future__ import annotations
 
+from mcp_server.document_text.cursors import (
+    DOCUMENT_TEXT_CURSOR_VERSION,
+    DOCUMENT_TEXT_OPERATION,
+    DocumentTextCursorError,
+    decode_document_text_cursor,
+    make_document_text_cursor,
+)
 from mcp_server.document_text.resolvers import (
     DocumentTextResolver,
     DocumentTextStrategy,
@@ -26,10 +33,15 @@ from mcp_server.document_text.resolvers import (
 )
 
 __all__ = [
+    "DOCUMENT_TEXT_CURSOR_VERSION",
+    "DOCUMENT_TEXT_OPERATION",
+    "DocumentTextCursorError",
     "DocumentTextResolver",
     "DocumentTextStrategy",
     "TextMode",
+    "decode_document_text_cursor",
     "document_text_error",
     "get_document_text_resolver",
+    "make_document_text_cursor",
     "supported_document_text_sources",
 ]
