@@ -23,7 +23,7 @@ dev = ["pytest"]
 legal = "legal.__main__:main"
 
 [tool.setuptools]
-packages = ["legal", "api", "mcp_server", "deploy"]
+packages = ["legal", "api", "mcp_server", "legal_deploy"]
 
 [tool.pytest.ini_options]
 markers = ["live: hits real external sources; gated behind LEGAL_LIVE=1"]
