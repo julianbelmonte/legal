@@ -23,6 +23,11 @@ from mcp_server.auth.models import (
     RegisteredClient,
     TokenClaims,
 )
+from mcp_server.auth.provider import (
+    OAuthProviderError,
+    SingleUserOAuthProvider,
+    compute_s256_challenge,
+)
 
 __all__ = [
     "DEFAULT_SCOPE",
@@ -31,7 +36,10 @@ __all__ = [
     "AuthorizationCode",
     "OAuthError",
     "OAuthErrorCode",
+    "OAuthProviderError",
     "RefreshToken",
     "RegisteredClient",
+    "SingleUserOAuthProvider",
     "TokenClaims",
+    "compute_s256_challenge",
 ]
