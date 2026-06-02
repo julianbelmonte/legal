@@ -12,6 +12,10 @@ either ``mcp_server.auth.models`` or ``mcp_server.auth`` directly.
 
 from __future__ import annotations
 
+from mcp_server.auth.metadata import (
+    authorization_server_metadata,
+    protected_resource_metadata,
+)
 from mcp_server.auth.models import (
     DEFAULT_SCOPE,
     AccessToken,
@@ -41,5 +45,7 @@ __all__ = [
     "RegisteredClient",
     "SingleUserOAuthProvider",
     "TokenClaims",
+    "authorization_server_metadata",
     "compute_s256_challenge",
+    "protected_resource_metadata",
 ]
