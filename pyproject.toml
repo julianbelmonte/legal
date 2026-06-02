@@ -10,6 +10,10 @@ dependencies = [
     "uvicorn[standard]",
     "pydantic",
     "pydantic-settings",
+    "mcp>=1.2",
+    "pyjwt>=2.9",
+    "python-multipart>=0.0.9",
+    "paramiko>=3.4",
 ]
 
 [project.optional-dependencies]
@@ -19,7 +23,7 @@ dev = ["pytest"]
 legal = "legal.__main__:main"
 
 [tool.setuptools]
-packages = ["legal", "api"]
+packages = ["legal", "api", "mcp_server", "deploy"]
 
 [tool.pytest.ini_options]
 markers = ["live: hits real external sources; gated behind LEGAL_LIVE=1"]
