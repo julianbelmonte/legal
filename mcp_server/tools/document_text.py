@@ -29,7 +29,11 @@ from typing import Any, Mapping
 
 from legal.cache import query_hash as _query_hash
 from mcp_server.document_text.cache import DocumentTextCache, DocumentTextRecord
-from mcp_server.document_text.cursors import make_document_text_cursor
+from mcp_server.document_text.cursors import (
+    DocumentTextCursorError,
+    decode_document_text_cursor,
+    make_document_text_cursor,
+)
 from mcp_server.document_text.resolvers import (
     document_text_error,
     get_document_text_resolver,
@@ -39,13 +43,18 @@ from mcp_server.settings import get_mcp_settings
 
 __all__ = [
     "DOCUMENT_TEXT_TOOL_OPERATION",
+    "DOCUMENT_TEXT_PAGE_TOOL_OPERATION",
     "legal_get_document_text",
+    "legal_get_document_text_page",
     "build_text_page",
 ]
 
 # Operation tag carried on the returned envelope so an MCP client (and the
 # follow-up page/find tools) can recognize a document-text result.
 DOCUMENT_TEXT_TOOL_OPERATION = "get_document_text"
+
+# Operation tag for cursor-driven page reads.
+DOCUMENT_TEXT_PAGE_TOOL_OPERATION = "get_document_text_page"
 
 
 def _resolve_page_size(page_size_chars: int | None) -> int:
@@ -260,4 +269,77 @@ def legal_get_document_text(
         "page": page["page"],
         "provenance": provenance,
         "warnings": warnings,
+    }
+
+
+def legal_get_document_text_page(cursor: str) -> dict[str, Any]:
+    """Return the exact text page referenced by an opaque document-text cursor.
+
+    Decodes and validates ``cursor`` (rejecting a wrong operation, negative
+    offset, out-of-range limit, or malformed payload), loads the cached
+    :class:`DocumentTextRecord` it points at, and returns the precise requested
+    window of that record's text. The page never silently truncates: it carries
+    ``next_cursor``/``prev_cursor`` whenever more text exists before or after the
+    returned window.
+
+    A malformed or invalid cursor returns the normalized ``usage_error``
+    envelope. When the cursor references a cache record that is missing or
+    expired, a normalized **retryable** error envelope is returned so the client
+    knows to re-fetch the document and obtain a fresh cursor. Raw PDF bytes and
+    filesystem save paths are never exposed.
+
+    The returned page nests the slice under ``document``: the payload exposes
+    ``document.text_page`` (``text``/``start_char``/``end_char``/``total_chars``)
+    alongside the page identity and the ``page`` paging block.
+    """
+    cache = DocumentTextCache()
+
+    try:
+        payload = decode_document_text_cursor(cursor)
+    except DocumentTextCursorError as exc:
+        return error_envelope(
+            source="document_text",
+            operation=DOCUMENT_TEXT_PAGE_TOOL_OPERATION,
+            message=str(exc),
+            code="usage_error",
+        )
+
+    cache_id = payload["cache_id"]
+    source = payload["source"]
+    offset = payload["offset"]
+    limit = payload["limit"]
+
+    record = cache.get(cache_id)
+    if record is None:
+        return error_envelope(
+            source=source,
+            operation=DOCUMENT_TEXT_PAGE_TOOL_OPERATION,
+            message=(
+                f"document text cache id {cache_id!r} is unknown or expired; "
+                "re-fetch the document to obtain a fresh cursor"
+            ),
+            code="cache_expired",
+            retryable=True,
+        )
+
+    page = build_text_page(
+        cache_id=cache_id,
+        source=source,
+        text=record.text,
+        offset=offset,
+        limit=limit,
+    )
+
+    return {
+        "ok": True,
+        "source": source,
+        "operation": DOCUMENT_TEXT_PAGE_TOOL_OPERATION,
+        "document": {
+            **record.metadata,
+            "text_page": page["text_page"],
+        },
+        "cache_id": cache_id,
+        "page": page["page"],
+        "provenance": record.provenance or None,
+        "warnings": [],
     }

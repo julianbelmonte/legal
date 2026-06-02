@@ -93,11 +93,14 @@ def error_envelope(
     operation: str,
     message: str,
     code: str = "serialization_error",
+    retryable: bool = False,
 ) -> dict[str, Any]:
     """Build a normalized MCP-friendly error envelope.
 
     Used when a pipeline result cannot be serialized, so the MCP tool can still
-    return a stable JSON document instead of failing opaquely.
+    return a stable JSON document instead of failing opaquely. ``retryable``
+    flags transient conditions (such as a cursor that references an expired
+    cache record) so a client can safely retry the originating request.
     """
     return {
         "ok": False,
@@ -106,6 +109,6 @@ def error_envelope(
         "error": {
             "code": code,
             "message": message,
-            "retryable": False,
+            "retryable": retryable,
         },
     }
