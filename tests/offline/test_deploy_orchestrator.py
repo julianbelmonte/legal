@@ -91,6 +91,28 @@ def test_state_roundtrip(tmp_path):
     assert loaded["ip"] == "1.2.3.4"
 
 
+def test_state_file_written_with_restrictive_perms(tmp_path):
+    import stat
+
+    state_file = tmp_path / "state.json"
+    path = deploy.save_state({"instance_id": "abc"}, state_file)
+    # save_state chmods the file to 0600 (owner read/write only).
+    mode = stat.S_IMODE(path.stat().st_mode)
+    assert mode == 0o600
+    # No group/other access bits are set.
+    assert mode & (stat.S_IRWXG | stat.S_IRWXO) == 0
+
+
+def test_missing_state_file_loads_empty(tmp_path):
+    assert deploy.load_state(tmp_path / "nope.json") == {}
+
+
+def test_corrupt_state_file_loads_empty(tmp_path):
+    state_file = tmp_path / "state.json"
+    state_file.write_text("{ not valid json", encoding="utf-8")
+    assert deploy.load_state(state_file) == {}
+
+
 def test_instance_ip_extraction():
     assert deploy._instance_ip({"mainIp": "10.0.0.1"}) == "10.0.0.1"
     assert deploy._instance_ip({"networks": [{"public_ip": "2.2.2.2"}]}) == "2.2.2.2"
