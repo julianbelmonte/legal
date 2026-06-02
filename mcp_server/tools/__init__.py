@@ -8,8 +8,9 @@ the existing pipeline seams (``legal.registry``, ``legal.schema``,
 ``legal.dispatch``, ...) and adds no source-access logic of its own.
 
 Tools are grouped by concern into submodules. Discovery tools live in
-:mod:`mcp_server.tools.discovery`; they are re-exported here so callers can
-import them from either the package or the submodule.
+:mod:`mcp_server.tools.discovery` and the global search tool lives in
+:mod:`mcp_server.tools.search`; they are re-exported here so callers can import
+them from either the package or the submodule.
 """
 
 from __future__ import annotations
@@ -19,9 +20,11 @@ from mcp_server.tools.discovery import (
     legal_source,
     legal_sources,
 )
+from mcp_server.tools.search import legal_search
 
 __all__ = [
     "legal_sources",
     "legal_source",
     "legal_schema",
+    "legal_search",
 ]
