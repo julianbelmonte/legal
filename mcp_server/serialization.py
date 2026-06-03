@@ -112,3 +112,46 @@ def error_envelope(
             "retryable": retryable,
         },
     }
+
+
+# Item keys kept in a lean (non-raw) search envelope. Everything else on an
+# item (source_fields, descriptores, suggest, raw, per-item provenance) is
+# high-volume, low-signal noise that blows past MCP token limits on a full
+# fan-out, so it is gated behind ``raw=True``.
+_LEAN_ITEM_KEYS = ("id", "title", "date", "url", "snippet")
+
+
+def lean_search_envelope(envelope: Any, *, raw: bool) -> Any:
+    """Return a token-lean version of a search envelope unless ``raw`` is set.
+
+    In lean mode each item is reduced to ``{id, title, date, type, url,
+    snippet, score}`` (``type`` lifted from ``document_type`` and ``score``
+    from per-item ``provenance.raw.documentScore``), and the bulky per-item
+    ``source_fields`` / ``raw`` / ``provenance`` blocks are dropped. The
+    response-level ``provenance`` is kept once. With ``raw=True`` the envelope
+    is returned unchanged.
+    """
+    if raw or not isinstance(envelope, dict):
+        return envelope
+    items = envelope.get("items")
+    if not isinstance(items, list):
+        return envelope
+    lean_items: list[Any] = []
+    for item in items:
+        if not isinstance(item, dict):
+            lean_items.append(item)
+            continue
+        lean: dict[str, Any] = {k: item[k] for k in _LEAN_ITEM_KEYS if item.get(k) is not None}
+        doc_type = item.get("document_type") or item.get("type")
+        if doc_type is not None:
+            lean["type"] = doc_type
+        prov = item.get("provenance")
+        score = None
+        if isinstance(prov, dict) and isinstance(prov.get("raw"), dict):
+            score = prov["raw"].get("documentScore")
+        if score is not None:
+            lean["score"] = score
+        lean_items.append(lean)
+    trimmed = dict(envelope)
+    trimmed["items"] = lean_items
+    return trimmed

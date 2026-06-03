@@ -21,7 +21,7 @@ from typing import Any
 
 import legal.global_search
 
-from mcp_server.serialization import to_jsonable
+from mcp_server.serialization import lean_search_envelope, to_jsonable
 
 
 def legal_search(
@@ -51,4 +51,4 @@ def legal_search(
         limit_per_source=limit_per_source,
         raw=bool(raw),
     )
-    return to_jsonable(result)
+    return lean_search_envelope(to_jsonable(result), raw=bool(raw))

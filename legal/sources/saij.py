@@ -852,6 +852,7 @@ def _view_url(guid: str) -> str:
 
 
 def _title(content: Mapping[str, Any], metadata: Mapping[str, Any], uuid: str) -> str:
+    # Direct title fields (jurisprudencia / dictamen items use "titulo").
     for value in (
         content.get("titulo"),
         content.get("title"),
@@ -861,7 +862,22 @@ def _title(content: Mapping[str, Any], metadata: Mapping[str, Any], uuid: str) -
         title = _optional_text(value)
         if title:
             return title
-    return uuid
+    # Legislacion items carry no "titulo": the real title lives in
+    # ``nombre-coloquial`` (e.g. "LEY N. 1901") + ``titulo-norma`` (the subject).
+    # Without this the opaque GUID would leak as the title.
+    nombre = _optional_text(content.get("nombre-coloquial"))
+    titulo_norma = _optional_text(content.get("titulo-norma"))
+    ident = nombre
+    if not ident and content.get("numero-norma") is not None:
+        tipo = content.get("tipo-norma")
+        if isinstance(tipo, Mapping):
+            tipo_text = _optional_text(tipo.get("texto") or tipo.get("codigo")) or ""
+        else:
+            tipo_text = _optional_text(tipo) or ""
+        ident = f"{tipo_text} {content.get('numero-norma')}".strip()
+    if ident and titulo_norma:
+        return f"{ident} — {titulo_norma}"
+    return ident or titulo_norma or uuid
 
 
 def _content_date(content: Mapping[str, Any]) -> str | None:

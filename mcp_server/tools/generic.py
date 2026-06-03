@@ -20,7 +20,7 @@ from typing import Any, Mapping
 
 import legal.dispatch
 
-from mcp_server.serialization import error_envelope, to_jsonable
+from mcp_server.serialization import error_envelope, lean_search_envelope, to_jsonable
 
 __all__ = [
     "UnsafeMcpParamsError",
@@ -149,4 +149,5 @@ def legal_run_operation(
         params or {},
         raw=bool(raw),
     )
-    return to_jsonable(result)
+    # Search-type results carry bulky per-item blocks; trim them unless raw.
+    return lean_search_envelope(to_jsonable(result), raw=bool(raw))

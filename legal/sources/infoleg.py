@@ -174,9 +174,17 @@ class InfolegLinksPage:
 
 
 def add_search_arguments(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--type", dest="norm_type", help="Infoleg norm type, e.g. ley or resolucion")
-    parser.add_argument("--number", help="norm number without punctuation")
-    parser.add_argument("--year", type=_year, help="sanction year; omitted for law searches")
+    parser.add_argument(
+        "--type", "--tipo", dest="norm_type",
+        help="Infoleg norm type, e.g. ley or resolucion",
+    )
+    parser.add_argument(
+        "--number", "--numero", dest="number", help="norm number without punctuation"
+    )
+    parser.add_argument(
+        "--year", "--anio", "--ano", type=_year, dest="year",
+        help="sanction year; omitted for law searches",
+    )
     parser.add_argument("--text", "--q", dest="text", help="free text search")
     parser.add_argument("--agency", help="raw Infoleg dependencia id")
     parser.add_argument(
@@ -1211,6 +1219,22 @@ def _dedupe_links(links: list[JsonDict]) -> list[JsonDict]:
     return output
 
 
+# Matches free text that is *only* a norm-number reference, e.g. "25990",
+# "25.990", "Ley 25.990", "ley N° 25990". Anchored so a real sentence (e.g.
+# "prescripción de la acción penal") does not match.
+_LAW_NUMBER_RE = re.compile(
+    r"^\s*(?:ley\s*)?(?:n[°ºo]?\s*)?([\d][\d.\s]{2,})\s*$", re.IGNORECASE
+)
+
+
+def _law_number_from_text(text: str) -> str | None:
+    match = _LAW_NUMBER_RE.match(text or "")
+    if not match:
+        return None
+    digits = re.sub(r"\D", "", match.group(1))
+    return digits if len(digits) >= 3 else None
+
+
 def _query_from_args(args: argparse.Namespace, *, cursor_payload: Mapping[str, Any]) -> JsonDict:
     raw = cursor_payload.get("raw") if cursor_payload else None
     if isinstance(raw, Mapping) and isinstance(raw.get("query"), Mapping):
@@ -1218,13 +1242,31 @@ def _query_from_args(args: argparse.Namespace, *, cursor_payload: Mapping[str, A
 
     type_input = _optional_text(args.norm_type)
     type_code = normalize_type_code(type_input)
+    number = _optional_text(args.number)
+    text = _optional_text(args.text)
+
+    # Infoleg's full-text field does not index norm numbers, so a query like
+    # "Ley 25.990" or a bare "25990" finds nothing. When the free text is just a
+    # norm-number reference and no explicit number was given, route it to a
+    # type+number lookup instead (which does work).
+    if number is None and text is not None:
+        law_number = _law_number_from_text(text)
+        if law_number is not None:
+            number = law_number
+            text = None
+            if type_code is None:
+                type_input, type_code = "ley", normalize_type_code("ley")
+    # A number search needs a type; default to "ley" (the most common case).
+    if number is not None and type_code is None:
+        type_input, type_code = "ley", normalize_type_code("ley")
+
     query: JsonDict = {
         "type": type_input,
         "type_code": type_code,
         "type_label": TYPE_LABEL_BY_CODE.get(type_code) if type_code else None,
-        "number": _optional_text(args.number),
+        "number": number,
         "year": args.year,
-        "text": _optional_text(args.text),
+        "text": text,
         "agency": _optional_text(args.agency),
         "published_from": _iso_date_string(args.published_from, flag="--from-date"),
         "published_to": _iso_date_string(args.published_to, flag="--to-date"),

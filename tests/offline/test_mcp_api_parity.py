@@ -175,11 +175,15 @@ def test_generic_tool_matches_api_route_envelope(
 def test_global_search_tool_matches_serialized_core_return(
     envelope: dict[str, Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """MCP search tool output == ``to_jsonable`` of the global-search return."""
+    """MCP search tool output == ``to_jsonable`` of the global-search return.
+
+    Parity is byte-for-byte in ``raw=True`` mode; ``raw=False`` (the default)
+    deliberately trims items to a token-lean shape, tested separately.
+    """
     fake = _FakeResponse(envelope)
     monkeypatch.setattr(legal.global_search, "run_global_search", lambda **k: fake)
 
-    result = legal_search(text="despido", all_direct=True)
+    result = legal_search(text="despido", all_direct=True, raw=True)
 
     assert result == to_jsonable(fake)
     assert result == envelope
@@ -208,11 +212,48 @@ def test_global_search_tool_matches_api_route_envelope(
         legal.global_search, "run_global_search", lambda **k: dict(envelope)
     )
 
-    mcp_result = legal_search(text="despido", all_direct=True)
+    mcp_result = legal_search(text="despido", all_direct=True, raw=True)
 
     resp = client.post(
         "/v1/search",
-        json={"text": "despido", "all_direct": True},
+        json={"text": "despido", "all_direct": True, "raw": True},
         headers=headers,
     )
     assert resp.json() == mcp_result
+
+
+def test_global_search_tool_trims_items_when_not_raw(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """raw=False (default) reduces items to the lean shape; provenance kept once."""
+    rich = {
+        "ok": True,
+        "source": "legal",
+        "operation": "search",
+        "items": [
+            {
+                "id": "saij:x",
+                "title": "T",
+                "date": "2024-01-01",
+                "document_type": "Sumario",
+                "url": "https://example/x",
+                "snippet": "s",
+                "source_fields": {"content": {"big": "x" * 2000}},
+                "facets": {"descriptores": ["a"] * 50},
+                "provenance": {"raw": {"documentScore": 1.5, "explain": "..."}},
+            }
+        ],
+        "provenance": {"source_urls": []},
+    }
+    monkeypatch.setattr(
+        legal.global_search, "run_global_search", lambda **k: dict(rich)
+    )
+
+    lean = legal_search(text="x", all_direct=True)  # raw defaults to False
+
+    item = lean["items"][0]
+    assert set(item) == {"id", "title", "date", "type", "url", "snippet", "score"}
+    assert item["score"] == 1.5
+    assert item["type"] == "Sumario"
+    assert "source_fields" not in item and "provenance" not in item
+    assert "provenance" in lean  # response-level provenance kept once
