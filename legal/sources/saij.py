@@ -682,15 +682,32 @@ def _make_client() -> LegalHttpClient:
     )
 
 
+# Spanish function words + caption connectors ("c/" actor c/ demandado, "s/"
+# sobre) that carry no search signal. ANDing them over-constrains the query and
+# tanks both recall and relevance, so they are dropped from the AND. Measured:
+# a full caption ANDed whole returns far fewer, lower-scored hits than the same
+# caption with these removed.
+_SAIJ_STOPWORDS = frozenset(
+    """
+    a al ante bajo cabe con contra de del desde durante e en entre hacia hasta
+    la el los las lo le les un una unos unas y o u ni que su sus se mediante para
+    por segun según sin so sobre tras como mas más muy ya ser son fue
+    c s v vs nro num
+    """.split()
+)
+
+
 def _build_texto_query(text: str) -> str:
     """Build a relevance-friendly SAIJ ``texto`` raw query from free text.
 
     ``texto:<words>`` makes SAIJ AND only the first token into the ``texto``
     field and OR the rest into the default ``contenido`` field, so a multi-term
     query matches almost everything and ranks by recency. Instead we AND every
-    term inside ``texto`` (``texto:(a AND b AND ...)``), which SAIJ expands to
-    ``+texto:a +texto:b ...`` — every term required, results ranked by score.
-    Quoted phrases in the input are preserved as phrase matches.
+    *significant* term inside ``texto`` (``texto:(a AND b AND ...)``), which SAIJ
+    expands to ``+texto:a +texto:b ...`` — terms required, results ranked by
+    score. Spanish stopwords/connectors are dropped so a pasted case caption or
+    long phrase is not over-constrained. Quoted phrases are kept as phrase
+    matches.
     """
     import shlex
 
@@ -700,12 +717,18 @@ def _build_texto_query(text: str) -> str:
         tokens = text.split()
     parts: list[str] = []
     for token in tokens:
-        token = token.strip()
-        if not token:
+        if " " in token.strip():  # quoted phrase — keep verbatim
+            phrase = token.strip()
+            if phrase:
+                parts.append(f'"{phrase}"')
             continue
-        parts.append(f'"{token}"' if " " in token else token)
-    if not parts:
-        return f"texto:{text}"
+        # Strip surrounding punctuation ("BARRA," -> "BARRA", "c/" -> "c").
+        token = token.strip().strip(".,;:/()[]{}\"'¿?¡!").strip()
+        if not token or token.lower() in _SAIJ_STOPWORDS:
+            continue
+        parts.append(token)
+    if not parts:  # query was all stopwords/punctuation — fall back to raw text
+        return f"texto:{text.strip()}"
     if len(parts) == 1:
         return f"texto:{parts[0]}"
     return "texto:(" + " AND ".join(parts) + ")"
