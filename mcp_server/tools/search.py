@@ -33,10 +33,12 @@ def legal_search(
 ) -> dict[str, Any]:
     """Search across the wired Argentina legal sources and aggregate results.
 
-    Fans ``text`` out across the selected direct sources and returns the
-    aggregated normalized envelope (tagged ``items``, per-source facets,
-    pagination, provenance, and warnings). Select sources with either
-    ``all_direct=True`` (every direct source) or a non-empty ``sources`` list;
+    Fans ``text`` out across the selected sources -- including Corte Suprema
+    (CSJN) jurisprudence -- and returns the aggregated normalized envelope
+    (tagged ``items``, per-source facets, pagination, provenance, and
+    warnings). Set ``all_direct=True`` to query every available source at once,
+    or pass a non-empty ``sources`` list to target specific ones (e.g.
+    ``["saij", "csjn"]`` for doctrine plus Supreme Court rulings);
     ``limit_per_source`` caps the hits requested from each source. Set ``raw`` to
     include each source's raw provider payload. Mirrors the API
     ``POST /v1/search`` route and the CLI ``search`` command 1:1 -- it delegates

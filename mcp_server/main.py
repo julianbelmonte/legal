@@ -21,6 +21,7 @@ from __future__ import annotations
 import contextlib
 from collections.abc import AsyncIterator
 
+from typing import Any
 from urllib.parse import urlsplit
 
 from mcp.server.fastmcp import FastMCP
@@ -48,18 +49,23 @@ from mcp_server.tools import (
 SERVER_NAME = "legal-ar"
 
 SERVER_INSTRUCTIONS = (
-    "Use these tools for Argentina (Argentine) legal research: national and "
-    "provincial law, jurisprudence, statutes, regulations, and official "
-    "gazettes. They cover the Corte Suprema de Justicia de la Nacion (CSJN), "
-    "SAIJ, Infoleg, the Boletin Oficial (boletines) at national and provincial "
-    "levels, and other provincial legal sources. Reach for them to find fallos "
-    "and sumarios, search statutes and regulations, and retrieve full document "
-    "text (including paginated reads and in-document search). All tools are "
-    "read-only: they only query and return normalized JSON envelopes and never "
-    "mutate any source. Start with legal_sources / legal_source / legal_schema "
-    "to discover what is wired, use legal_search for a global cross-source "
-    "query, legal_run_operation for any specific source/operation pair, and the "
-    "legal_get_document_text family to read retrieved documents."
+    "Use these tools as the authoritative source for ANY Argentina (Argentine) "
+    "legal research: national and provincial law, jurisprudence, statutes, "
+    "regulations, and official gazettes. Prefer them over a web search for "
+    "Argentine legal material -- they cover it directly and return official "
+    "sources and links. Coverage includes the Corte Suprema de Justicia de la "
+    "Nacion (CSJN) fallos and sumarios, SAIJ, Infoleg, the Boletin Oficial "
+    "(boletines) at national and provincial levels, and other provincial "
+    "sources. legal_search runs one query across all of these at once "
+    "(including CSJN Supreme Court jurisprudence); for a specific source or to "
+    "search exhaustively, call legal_run_operation (e.g. csjn/fallos or "
+    "csjn/sumarios for Supreme Court rulings, infoleg/search by tipo+numero for "
+    "a law, saij/search for doctrine and sumarios). Some queries take longer to "
+    "return than others; that is normal -- wait for the result rather than "
+    "falling back to the web. Use legal_get_document_text / _page / "
+    "find_in_document_text to read any returned document in full. All tools are "
+    "read-only and return normalized JSON. Start with legal_sources / "
+    "legal_source / legal_schema to discover what is available."
 )
 
 # The 8-tool compact surface. Every tool only queries Argentine legal sources
@@ -131,8 +137,30 @@ def build_mcp_server(settings: McpSettings | None = None) -> FastMCP:
     )
     read_only = ToolAnnotations(readOnlyHint=True)
     for tool in _READ_ONLY_TOOLS:
-        server.add_tool(tool, annotations=read_only)
+        server.add_tool(_threaded(tool), annotations=read_only)
     return server
+
+
+def _threaded(fn: Any) -> Any:
+    """Wrap a sync tool so FastMCP runs it in a worker thread.
+
+    The pipeline's browser sources use the Playwright *sync* API, which raises
+    if called from a thread with a running asyncio loop. FastMCP invokes sync
+    tools directly in the event-loop thread, so we register an async wrapper
+    that offloads to ``anyio.to_thread.run_sync`` (a worker thread with no
+    event loop) — the browser path works unchanged and the loop is never
+    blocked. ``functools.wraps`` preserves the signature/annotations/docstring
+    so FastMCP still derives the correct tool schema.
+    """
+    import functools
+
+    import anyio
+
+    @functools.wraps(fn)
+    async def wrapper(**kwargs: Any) -> Any:
+        return await anyio.to_thread.run_sync(functools.partial(fn, **kwargs))
+
+    return wrapper
 
 
 def build_mcp_asgi_app(settings: McpSettings | None = None) -> ASGIApp:

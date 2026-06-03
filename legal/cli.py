@@ -206,10 +206,19 @@ def _source_operation(source_id: str, operation: str) -> SourceOperation:
 
 
 # Sources that have no generic ``search`` op but expose a search-like operation
-# the global fan-out can route to. These are browser-backed (slow/probabilistic),
-# so they only enter the fan-out when the caller lists them explicitly — never
-# under ``all_direct`` (which stays fast/direct-only).
+# the global fan-out can route to (e.g. csjn -> fallos).
 _GLOBAL_SEARCH_OP_ALIASES = {"csjn": "fallos"}
+
+# Browser-backed sources cheap enough (no captcha-solver credits) to fold into
+# the broad ``all_direct`` search, so Corte Suprema jurisprudence is never hidden
+# from a cross-source query.
+_GLOBAL_SEARCH_BROWSER_INCLUDE = {"csjn"}
+
+# Sources whose search spends captcha-solver credits and launches a browser per
+# call (ptn = invisible reCAPTCHA via Capsolver), kept out of the broad
+# ``all_direct`` fan-out to bound its cost/latency. They remain available when
+# listed explicitly in ``sources``.
+_GLOBAL_SEARCH_ALL_DIRECT_EXCLUDE = {"ptn"}
 
 
 def _global_search_op_name(source_id: str) -> str | None:
@@ -232,13 +241,18 @@ def _global_search_op_name(source_id: str) -> str | None:
 
 def _select_global_search_sources(args: argparse.Namespace) -> list[str]:
     if args.all_direct:
-        return [
-            source.id
-            for source in SOURCES
-            if not source.browser_required
-            and "search" in source.operations
-            and REQUIRES_SEARCH_FILTERS_CAPABILITY not in source.capabilities
-        ]
+        selected: list[str] = []
+        for source in SOURCES:
+            if REQUIRES_SEARCH_FILTERS_CAPABILITY in source.capabilities:
+                continue
+            if _global_search_op_name(source.id) is None:
+                continue
+            if source.id in _GLOBAL_SEARCH_ALL_DIRECT_EXCLUDE:
+                continue
+            if source.browser_required and source.id not in _GLOBAL_SEARCH_BROWSER_INCLUDE:
+                continue
+            selected.append(source.id)
+        return selected
     selected: list[str] = []
     for source_id in args.global_sources or []:
         if source_id not in SOURCE_IDS:
