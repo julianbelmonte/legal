@@ -60,21 +60,28 @@ def resolve_operation(source_id: str, operation: str) -> SourceOperation:
 def _params_to_argv(parser: argparse.ArgumentParser, params: Mapping[str, Any]) -> list[str]:
     """Translate a params dict into argv understood by ``parser``.
 
-    Booleans map to store_true flags (included only when truthy), ``None`` values
-    are skipped, and every other value is emitted as ``--key value``. Underscores
-    in keys are normalized to dashes to match the CLI option spelling.
+    Params are keyed by an action's ``dest`` (the name handlers read), which is
+    not always the option spelling — e.g. ``--text`` has ``dest="want_text"``. We
+    therefore resolve each key to the option string of the matching action by its
+    ``dest`` rather than assuming ``--{key}``; keys with no matching action fall
+    back to ``--{key-with-dashes}``. Booleans map to store_true flags (included
+    only when truthy), ``None`` values are skipped, and every other value is
+    emitted as ``--option value``.
     """
-    store_true_dests = {
-        action.dest
-        for action in parser._actions
-        if isinstance(action, argparse._StoreTrueAction)
-    }
+    option_by_dest: dict[str, str] = {}
+    store_true_dests: set[str] = set()
+    for action in parser._actions:
+        if not action.option_strings:
+            continue
+        option_by_dest.setdefault(action.dest, action.option_strings[0])
+        if isinstance(action, argparse._StoreTrueAction):
+            store_true_dests.add(action.dest)
     argv: list[str] = []
     for key, value in params.items():
         if value is None:
             continue
-        option = f"--{str(key).replace('_', '-')}"
         dest = str(key).replace("-", "_")
+        option = option_by_dest.get(dest, f"--{str(key).replace('_', '-')}")
         if dest in store_true_dests or isinstance(value, bool):
             if value:
                 argv.append(option)

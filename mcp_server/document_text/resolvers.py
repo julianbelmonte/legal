@@ -162,14 +162,15 @@ class DocumentTextResolver:
 _STRATEGIES: tuple[DocumentTextStrategy, ...] = (
     DocumentTextStrategy(
         source_id="saij",
-        operation="download",
+        operation="get",
         id_params=("guid", "id"),
-        text_mode=TextMode.TEXT_FLAG,
-        want_text_param="want_text",
+        text_mode=TextMode.DIRECT,
         notes=(
-            "SAIJ download returns a LegalDocument with PDF metadata; --text "
-            "(want_text) includes extracted PDF text. url/file_url come from the "
-            "document."
+            "SAIJ get returns the document body text directly in 'body' (the "
+            "sumario/doctrina/fallo content from the SAIJ JSON), credit-free and "
+            "captcha-free. Preferred over 'download', which only resolves a PDF "
+            "attachment and raises not_found for the many SAIJ documents (most "
+            "sumarios and doctrina) that have no PDF."
         ),
     ),
     DocumentTextStrategy(
