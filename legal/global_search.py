@@ -156,7 +156,10 @@ def run_global_search(
             )
             continue
 
-        source_items = list(payload.get("items") or [])
+        # Most sources return ``items``; csjn/sumarios returns ``links`` (id +
+        # title of each matching sumario). Treat those as items so a
+        # Fallos-citation query aggregates instead of looking empty.
+        source_items = list(payload.get("items") or payload.get("links") or [])
         tagged_items = [_tag_global_item(item, source_id) for item in source_items]
         items.extend(tagged_items)
         success_count += 1
