@@ -13,8 +13,8 @@ from __future__ import annotations
 from inspect import signature
 
 import legal.global_search
-from mcp_server.tools import legal_search
-from mcp_server.tools import search as search_module
+from server.tools import legal_search
+from server.tools import search as search_module
 
 
 def test_legal_search_signature_exposes_parameters() -> None:

@@ -12,7 +12,7 @@ import stat
 
 import pytest
 
-from legal_deploy.secrets import (
+from deploy.secrets import (
     CLOUDZY_TOKEN_KEY,
     NGROK_AUTHTOKEN_ENV_VAR,
     DeploySecretError,

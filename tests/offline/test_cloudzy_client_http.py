@@ -1,6 +1,6 @@
 """Offline HTTP-level tests for the Cloudzy client.
 
-These tests drive :class:`legal_deploy.cloudzy.CloudzyClient` through a mocked
+These tests drive :class:`deploy.cloudzy.CloudzyClient` through a mocked
 ``httpx`` transport (``httpx.MockTransport``) so they assert request
 construction (method, URL, the ``API-Token`` auth header) and OKAY/FAILED
 envelope normalization WITHOUT contacting the real Cloudzy API. No real token
@@ -12,7 +12,7 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from legal_deploy.cloudzy import (
+from deploy.cloudzy import (
     CloudzyClient,
     CloudzyError,
     CloudzyTimeoutError,

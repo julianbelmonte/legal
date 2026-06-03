@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from legal.models import LegalError, LegalItem, LegalResponse
-from mcp_server.serialization import (
+from server.serialization import (
     SerializationError,
     error_envelope,
     to_jsonable,

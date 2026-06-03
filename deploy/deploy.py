@@ -1,13 +1,13 @@
 """End-to-end deployment orchestrator for the legal API + MCP server VPS.
 
-Runnable as ``python -m legal_deploy.deploy``. This module composes the existing
+Runnable as ``python -m deploy.deploy``. This module composes the existing
 deploy building blocks into a single deploy flow:
 
-- :mod:`legal_deploy.cloudzy` (``CloudzyClient``) to provision / reuse / poll /
+- :mod:`deploy.cloudzy` (``CloudzyClient``) to provision / reuse / poll /
   destroy a Cloudzy VPS,
-- :mod:`legal_deploy.secrets` (``load_deploy_secrets`` / ``redact_secret``) to
+- :mod:`deploy.secrets` (``load_deploy_secrets`` / ``redact_secret``) to
   resolve the Cloudzy token + ngrok authtoken without ever printing raw values,
-- :mod:`legal_deploy.bootstrap` (``render_bootstrap_script`` /
+- :mod:`deploy.bootstrap` (``render_bootstrap_script`` /
   ``render_systemd_units`` / ``render_env_file``) to render the remote setup.
 
 The deploy flow: provision-or-reuse a VPS, wait for SSH (paramiko), sync the
@@ -40,7 +40,7 @@ import time
 from pathlib import Path, PurePosixPath
 from typing import Any, Sequence
 
-from legal_deploy.bootstrap import (
+from deploy.bootstrap import (
     APP_SERVICE_NAME,
     DEFAULT_APP_PORT,
     NGROK_SERVICE_NAME,
@@ -48,15 +48,15 @@ from legal_deploy.bootstrap import (
     render_env_file,
     render_systemd_units,
 )
-from legal_deploy.cloudzy import (
+from deploy.cloudzy import (
     CloudzyClient,
     CloudzyError,
     CloudzyTimeoutError,
     CreateInstanceRequest,
     created_instance_id,
 )
-from legal_deploy.ngrok import oauth_env_updates
-from legal_deploy.secrets import (
+from deploy.ngrok import oauth_env_updates
+from deploy.secrets import (
     CLOUDZY_TOKEN_KEY,
     NGROK_AUTHTOKEN_ENV_VAR,
     DeploySecretError,
@@ -88,7 +88,7 @@ DEFAULT_REMOTE_ENV_FILE = str(PurePosixPath(DEFAULT_APP_DIR) / ".env")
 #: validated live IDs from the Cloudzy Developer API: a US-Las-Vegas region, a
 #: 4 GB / 2 vCPU default plan (enough headroom for uv sync + BotBrowser vendor),
 #: and the Ubuntu Server 24.04 LTS image. Discover current IDs with
-#: ``python -m legal_deploy.cloudzy_cli regions|products|os``.
+#: ``python -m deploy.cloudzy_cli regions|products|os``.
 DEFAULT_REGION = "US-Las-Vegas"
 DEFAULT_PRODUCT = "2d798f98-d0e1-4b78-ba5c-663b2212bfb8"
 DEFAULT_OS = "4700a1df2452ce24d8349625ba8b45d4bd1c54e60ad06ff879bce048935d57ff"
@@ -641,7 +641,7 @@ def _next_steps(ip: str, ngrok_url: str | None, mcp_url: str | None) -> list[str
             "legal-ngrok service on the VPS."
         )
     steps.append(
-        "Run `python -m legal_deploy.deploy destroy` to tear the VPS down."
+        "Run `python -m deploy.deploy destroy` to tear the VPS down."
     )
     return steps
 

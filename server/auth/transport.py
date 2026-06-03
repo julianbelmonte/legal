@@ -10,13 +10,13 @@ The guard is a Starlette/ASGI middleware (the ``mcp`` SDK transport is
 Starlette-based). For every protected request it:
 
 - extracts ``Authorization: Bearer <token>`` and validates it through
-  :class:`~mcp_server.auth.provider.SingleUserOAuthProvider` (signature,
+  :class:`~server.auth.provider.SingleUserOAuthProvider` (signature,
   audience, issuer, expiry, and allowlist re-check);
 - on a missing/invalid/expired/wrong-audience/wrong-issuer/non-allowlisted
   token, returns HTTP ``401`` with a RFC 9728 / RFC 6750 ``WWW-Authenticate:
   Bearer`` challenge that points at the protected-resource metadata so clients
   can begin the OAuth flow;
-- on success, stashes the decoded :class:`~mcp_server.auth.models.TokenClaims`
+- on success, stashes the decoded :class:`~server.auth.models.TokenClaims`
   on the request scope (``scope["mcp_token_claims"]``) and forwards the request.
 
 Step 20 mounts the actual MCP ASGI app behind this middleware; here we only
@@ -30,10 +30,10 @@ from collections.abc import Callable, Iterable
 
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from mcp_server.auth.metadata import PROTECTED_RESOURCE_METADATA_PATH
-from mcp_server.auth.models import OAuthErrorCode, TokenClaims
-from mcp_server.auth.provider import SingleUserOAuthProvider
-from mcp_server.settings import McpSettings, get_mcp_settings
+from server.auth.metadata import PROTECTED_RESOURCE_METADATA_PATH
+from server.auth.models import OAuthErrorCode, TokenClaims
+from server.auth.provider import SingleUserOAuthProvider
+from server.settings import McpSettings, get_mcp_settings
 
 # Default path prefix the MCP transport is mounted at.
 DEFAULT_MCP_PATH = "/mcp"

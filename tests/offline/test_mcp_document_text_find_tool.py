@@ -19,11 +19,11 @@ from inspect import signature
 
 import pytest
 
-from mcp_server.document_text.cache import DocumentTextCache
-from mcp_server.document_text.cursors import make_document_text_cursor
-from mcp_server.settings import reload_mcp_settings
-from mcp_server.tools import document_text as tool
-from mcp_server.tools.document_text import (
+from server.document_text.cache import DocumentTextCache
+from server.document_text.cursors import make_document_text_cursor
+from server.settings import reload_mcp_settings
+from server.tools import document_text as tool
+from server.tools.document_text import (
     DOCUMENT_TEXT_FIND_TOOL_OPERATION,
     legal_find_in_document_text,
 )

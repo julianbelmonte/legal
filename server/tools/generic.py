@@ -20,7 +20,7 @@ from typing import Any, Mapping
 
 import legal.dispatch
 
-from mcp_server.serialization import error_envelope, lean_search_envelope, to_jsonable
+from server.serialization import error_envelope, lean_search_envelope, to_jsonable
 
 __all__ = [
     "UnsafeMcpParamsError",

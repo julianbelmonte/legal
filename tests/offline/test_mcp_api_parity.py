@@ -32,8 +32,8 @@ import pytest
 
 import legal.dispatch
 import legal.global_search
-from mcp_server.serialization import to_jsonable
-from mcp_server.tools import legal_run_operation, legal_search
+from server.serialization import to_jsonable
+from server.tools import legal_run_operation, legal_search
 
 
 # --------------------------------------------------------------------------- #

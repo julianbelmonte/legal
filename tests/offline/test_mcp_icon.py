@@ -10,7 +10,7 @@ from __future__ import annotations
 from starlette.testclient import TestClient
 
 import api.main as api_main
-from mcp_server.main import (
+from server.main import (
     ICON_FILE,
     ICON_ROUTE_PATH,
     build_mcp_server,
@@ -18,7 +18,7 @@ from mcp_server.main import (
     public_origin,
     server_icons,
 )
-from mcp_server.settings import McpSettings
+from server.settings import McpSettings
 
 PUBLIC_URL = "https://mcp.example.test/mcp"
 

@@ -26,8 +26,8 @@ from legal.errors import LegalCliError
 
 from api.errors import error_to_envelope
 from api.routers import csjn, discovery, generic, saij, search
-from mcp_server.auth.routes import build_oauth_routes
-from mcp_server.main import (
+from server.auth.routes import build_oauth_routes
+from server.main import (
     ICON_FILE,
     ICON_MIME,
     ICON_ROUTE_PATH,

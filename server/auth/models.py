@@ -9,7 +9,7 @@ allowed-user record, JWT-style :class:`TokenClaims`, and OAuth error payloads.
 Design notes:
 
 - All models are pydantic v2 ``BaseModel``s, consistent with the rest of the
-  consumer layer and ``mcp_server.settings``.
+  consumer layer and ``server.settings``.
 - Secret material (authorization-code values, token strings, client secrets)
   uses :class:`~pydantic.SecretStr` so it is masked in ``repr``/log output and
   never leaks into tracebacks.
@@ -18,7 +18,7 @@ Design notes:
   ``scope``, ``client_id``, ``email`` ...) are optional with sensible defaults.
   Build/serialize helpers keep the provider in step 17 thin.
 - Configurable issuer, resource URL, token TTL, allowed redirect URIs, and
-  allowed emails live on :class:`mcp_server.settings.McpSettings`; this module
+  allowed emails live on :class:`server.settings.McpSettings`; this module
   references those rather than duplicating configuration.
 """
 

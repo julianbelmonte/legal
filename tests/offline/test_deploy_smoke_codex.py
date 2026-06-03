@@ -1,4 +1,4 @@
-"""Offline tests for legal_deploy.smoke_codex (dry-run plan and redaction)."""
+"""Offline tests for deploy.smoke_codex (dry-run plan and redaction)."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from legal_deploy import smoke_codex
+from deploy import smoke_codex
 
 
 SERVER_URL = "https://example.ngrok.app/mcp"

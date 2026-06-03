@@ -57,14 +57,14 @@ uv run uvicorn api.main:app --host 0.0.0.0 --port 8080
 `LEGAL_MCP_PORT`):
 
 ```bash
-uv run python -m mcp_server.main
+uv run python -m server.main
 ```
 
 For local development without OAuth, disable auth so the MCP secrets are not
 required:
 
 ```bash
-LEGAL_MCP_AUTH_ENABLED=false uv run python -m mcp_server.main
+LEGAL_MCP_AUTH_ENABLED=false uv run python -m server.main
 ```
 
 Run the offline test tier (no network, no credentials):
@@ -78,7 +78,7 @@ uv run pytest -m "not live"
 ## 3. OAuth env vars and single-user allowlisting
 
 The MCP server reads its OAuth/runtime config from the environment with the
-`LEGAL_MCP_` prefix (see `mcp_server/settings.py`). It **fails closed**: when
+`LEGAL_MCP_` prefix (see `server/settings.py`). It **fails closed**: when
 auth is enabled (the default), the signing key and login secret must be set or
 the server refuses to start.
 
@@ -107,7 +107,7 @@ public URL.
 ## 4. Deploy secrets
 
 The deploy tooling resolves local credentials through a redaction-safe loader
-(`legal_deploy/secrets.py`). Provide them once on the machine that runs the
+(`deploy/secrets.py`). Provide them once on the machine that runs the
 deploy:
 
 - `CLOUDZY_API_TOKEN` — Cloudzy API token, read from the deploy env file
@@ -131,29 +131,29 @@ chmod 600 ~/.config/legal-agent/deploy.env
 ## 5. Cloudzy VPS provisioning
 
 Low-level VPS catalog and lifecycle operations are wrapped by the Cloudzy CLI
-(`python -m legal_deploy.cloudzy_cli`). Every subcommand prints one JSON
+(`python -m deploy.cloudzy_cli`). Every subcommand prints one JSON
 document; `--dry-run` is a global flag that contacts no network and needs no
 token. The `CLOUDZY_API_TOKEN` is never printed.
 
 ```bash
 # Discovery (read-only)
-python -m legal_deploy.cloudzy_cli regions
-python -m legal_deploy.cloudzy_cli products
-python -m legal_deploy.cloudzy_cli os
-python -m legal_deploy.cloudzy_cli ssh-keys
-python -m legal_deploy.cloudzy_cli instances
+python -m deploy.cloudzy_cli regions
+python -m deploy.cloudzy_cli products
+python -m deploy.cloudzy_cli os
+python -m deploy.cloudzy_cli ssh-keys
+python -m deploy.cloudzy_cli instances
 
 # Provision (always dry-run first)
-python -m legal_deploy.cloudzy_cli provision \
+python -m deploy.cloudzy_cli provision \
   --region us-east --product vps-1 --hostname legal-agent \
   --ssh-key <key-id> --wait --dry-run
 
 # Tear down a specific instance
-python -m legal_deploy.cloudzy_cli destroy <instance_id> --dry-run
+python -m deploy.cloudzy_cli destroy <instance_id> --dry-run
 ```
 
 For routine infrastructure work, use the **`cloudzy-deployment`** agent skill
-(`agent_skills/cloudzy-deployment`), which wraps this CLI.
+(`.claude/skills/cloudzy-deployment`), which wraps this CLI.
 
 ---
 
@@ -177,7 +177,7 @@ add-authtoken`) and never appears in logged output.
 
 ## 7. End-to-end deploy
 
-The orchestrator (`python -m legal_deploy.deploy`) composes everything:
+The orchestrator (`python -m deploy.deploy`) composes everything:
 provision-or-reuse a VPS, wait for SSH, rsync the repo, write the remote env
 file (`chmod 600`), run the bootstrap, `uv sync`, start the systemd services,
 verify `/healthz`, and discover the ngrok URL. Recorded state lives at
@@ -185,13 +185,13 @@ verify `/healthz`, and discover the ngrok URL. Recorded state lives at
 
 ```bash
 # Inspect the ordered plan safely (no network, no token, no SSH)
-python -m legal_deploy.deploy --dry-run --json
+python -m deploy.deploy --dry-run --json
 
 # Real deploy
-python -m legal_deploy.deploy --json
+python -m deploy.deploy --json
 
 # Provision a brand-new instance instead of reusing recorded state
-python -m legal_deploy.deploy --fresh --json
+python -m deploy.deploy --fresh --json
 ```
 
 The deploy result includes `instance_id`, `ip`, `ngrok_url`, `mcp_url`,
@@ -199,7 +199,7 @@ The deploy result includes `instance_id`, `ip`, `ngrok_url`, `mcp_url`,
 what you hand to Claude Cowork.
 
 For the end-to-end application deploy, use the **`legal-mcp-deployment`** agent
-skill (`agent_skills/legal-mcp-deployment`), which wraps this orchestrator.
+skill (`.claude/skills/legal-mcp-deployment`), which wraps this orchestrator.
 
 ---
 
@@ -213,11 +213,11 @@ the deploy secrets via a single script:
 
 ```bash
 # Render the plan + artifacts (Caddyfile, systemd unit, env keys); no SSH.
-legal_deploy/deploy_domain.sh --host <ip> --dry-run
+deploy/deploy_domain.sh --host <ip> --dry-run
 
 # Deploy to an existing SSH-reachable host (defaults: domain mcp.arglegal.live,
 # app dir /opt/legal-agent, service user legal, port 8080, email yoli@arglegal.live).
-legal_deploy/deploy_domain.sh --host <ip>
+deploy/deploy_domain.sh --host <ip>
 ```
 
 The script is idempotent and safe to re-run. It:
@@ -236,7 +236,7 @@ The script is idempotent and safe to re-run. It:
 
 **Secrets** come from a local KEY=VALUE file (default
 `~/.config/legal-agent/deploy.env`, chmod 600 — see
-`legal_deploy/deploy.env.example`). Required: `LEGAL_ANYIP_USER`,
+`deploy/deploy.env.example`). Required: `LEGAL_ANYIP_USER`,
 `LEGAL_ANYIP_PASS`, `LEGAL_CAPSOLVER_API_KEY`, `LEGAL_MCP_OAUTH_SIGNING_KEY`,
 `LEGAL_MCP_OAUTH_LOGIN_SECRET`, `LEGAL_API_KEY`. Keep the signing key / login
 secret **stable** across redeploys or previously issued bearer tokens and the
@@ -261,10 +261,10 @@ calls `legal_sources`, and runs a small `legal_search`.
 
 ```bash
 # Plan only (no network, no token, no codex binary needed)
-python -m legal_deploy.smoke_codex --server-url https://<ngrok>/mcp --dry-run
+python -m deploy.smoke_codex --server-url https://<ngrok>/mcp --dry-run
 
 # Live smoke
-python -m legal_deploy.smoke_codex --server-url https://<ngrok>/mcp
+python -m deploy.smoke_codex --server-url https://<ngrok>/mcp
 ```
 
 A bearer token, when needed, is read from `--bearer-token` or
@@ -296,7 +296,7 @@ Claude Cowork.
   ngrok units (`journalctl -u legal-agent`, `journalctl -u legal-ngrok`).
 - **ngrok status** — query the local agent API on the VPS
   (`curl -fsS http://127.0.0.1:4040/api/tunnels`) or use
-  `legal_deploy.ngrok.discover_public_url`. No running tunnel means no MCP URL.
+  `deploy.ngrok.discover_public_url`. No running tunnel means no MCP URL.
 - **OAuth metadata** — fetch the discovery documents (reachable without a
   bearer token):
   - `https://<ngrok>/.well-known/oauth-protected-resource`
@@ -318,17 +318,17 @@ Tear down the recorded VPS and clear local state:
 
 ```bash
 # Inspect the destroy plan first
-python -m legal_deploy.deploy destroy --dry-run --json
+python -m deploy.deploy destroy --dry-run --json
 
 # Destroy the recorded instance
-python -m legal_deploy.deploy destroy --json
+python -m deploy.deploy destroy --json
 ```
 
 To destroy a specific instance by id directly through the Cloudzy CLI:
 
 ```bash
-python -m legal_deploy.cloudzy_cli destroy <instance_id> --dry-run
-python -m legal_deploy.cloudzy_cli destroy <instance_id>
+python -m deploy.cloudzy_cli destroy <instance_id> --dry-run
+python -m deploy.cloudzy_cli destroy <instance_id>
 ```
 
 After a destroy, the deploy state file is cleared, so the next deploy provisions
@@ -364,17 +364,17 @@ writes that config (signing key, allowed email, issuer = tunnel base, resource =
 `<tunnel>/mcp`) into the local, `0600` deploy state file
 (`~/.config/legal-agent/deploy-state.json`).
 
-`legal_deploy.smoke_codex` **auto-mints** a token when none is supplied, so the
+`deploy.smoke_codex` **auto-mints** a token when none is supplied, so the
 smoke just needs the URL:
 
 ```bash
 # Auto-mints from the deploy state file (no token needed):
-uv run python -m legal_deploy.smoke_codex \
+uv run python -m deploy.smoke_codex \
   --server-url https://<tunnel-host>/mcp
 
 # Or set the remote URL via env and run with no flags:
 export LEGAL_MCP_REMOTE_URL=https://<tunnel-host>/mcp
-uv run python -m legal_deploy.smoke_codex --server-url "$LEGAL_MCP_REMOTE_URL"
+uv run python -m deploy.smoke_codex --server-url "$LEGAL_MCP_REMOTE_URL"
 ```
 
 Token resolution order in `smoke_codex`:

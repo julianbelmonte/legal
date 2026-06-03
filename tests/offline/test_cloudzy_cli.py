@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from legal_deploy import cloudzy_cli
+from deploy import cloudzy_cli
 
 
 def _run(capsys, argv):

@@ -10,9 +10,9 @@ two well-known JSON documents:
   ``/.well-known/oauth-authorization-server`` — advertises the authorization,
   token, and registration endpoints plus supported flows.
 
-Both documents derive entirely from :class:`~mcp_server.settings.McpSettings`
+Both documents derive entirely from :class:`~server.settings.McpSettings`
 (``LEGAL_MCP_PUBLIC_URL`` and the issuer), recomputed from
-:func:`~mcp_server.settings.get_mcp_settings` at call time. Changing the public
+:func:`~server.settings.get_mcp_settings` at call time. Changing the public
 URL (e.g. rotating an ngrok tunnel) is reflected with no code change. The
 concrete endpoint paths defined here are the contract that steps 19/20 mount.
 """
@@ -21,8 +21,8 @@ from __future__ import annotations
 
 from urllib.parse import urlsplit
 
-from mcp_server.auth.models import DEFAULT_SCOPE
-from mcp_server.settings import McpSettings, get_mcp_settings
+from server.auth.models import DEFAULT_SCOPE
+from server.settings import McpSettings, get_mcp_settings
 
 # Path (relative to the public origin) of the unauthenticated branding icon.
 ICON_PATH = "/icon.png"

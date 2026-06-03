@@ -2,7 +2,7 @@
 
 Before buying a domain + certificate, Claude Cowork testing needs a public,
 trusted HTTPS URL pointing at the combined ASGI app (``api.main:app``) running
-on the VPS. ngrok provides that: the bootstrap (:mod:`legal_deploy.bootstrap`)
+on the VPS. ngrok provides that: the bootstrap (:mod:`deploy.bootstrap`)
 installs ngrok and runs ``ngrok http <port>`` as a systemd unit, and this
 module renders the start command / authtoken-config command and discovers the
 resulting public HTTPS URL from ngrok's local agent API.

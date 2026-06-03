@@ -11,7 +11,7 @@ authorize a client (e.g. Claude Cowork). This module implements that policy:
 - signed JWT access tokens (pyjwt, ``HS256``) scoped to the MCP resource
   (``aud = settings.resource()``, ``iss = settings.issuer()``);
 - bearer-token verification that validates signature/audience/issuer/expiry and
-  re-checks the allowlist, returning a :class:`~mcp_server.auth.models.TokenClaims`.
+  re-checks the allowlist, returning a :class:`~server.auth.models.TokenClaims`.
 
 Security notes:
 
@@ -38,13 +38,13 @@ from dataclasses import dataclass, field
 import jwt
 from pydantic import SecretStr
 
-from mcp_server.auth.models import (
+from server.auth.models import (
     DEFAULT_SCOPE,
     AccessToken,
     AuthorizationCode,
     TokenClaims,
 )
-from mcp_server.settings import McpSettings, get_mcp_settings
+from server.settings import McpSettings, get_mcp_settings
 
 # JWT signing algorithm for issued access tokens.
 _JWT_ALG = "HS256"

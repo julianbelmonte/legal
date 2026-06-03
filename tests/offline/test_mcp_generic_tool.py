@@ -16,9 +16,9 @@ from inspect import signature
 import pytest
 
 import legal.dispatch
-from mcp_server.tools import legal_run_operation
-from mcp_server.tools import generic as generic_module
-from mcp_server.tools.generic import (
+from server.tools import legal_run_operation
+from server.tools import generic as generic_module
+from server.tools.generic import (
     UnsafeMcpParamsError,
     reject_unsafe_mcp_params,
 )

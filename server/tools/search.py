@@ -21,7 +21,7 @@ from typing import Any
 
 import legal.global_search
 
-from mcp_server.serialization import lean_search_envelope, to_jsonable
+from server.serialization import lean_search_envelope, to_jsonable
 
 
 def legal_search(

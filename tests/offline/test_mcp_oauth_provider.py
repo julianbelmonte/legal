@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import pytest
 
-from mcp_server.auth.provider import (
+from server.auth.provider import (
     OAuthProviderError,
     SingleUserOAuthProvider,
     compute_s256_challenge,
 )
-from mcp_server.settings import McpSettings
+from server.settings import McpSettings
 
 EMAIL = "user@example.com"
 SECRET = "test-secret"

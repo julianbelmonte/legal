@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from mcp_server.auth.models import (
+from server.auth.models import (
     AccessToken,
     AllowedUser,
     AuthorizationCode,

@@ -25,8 +25,8 @@ from legal.pagination import (
     decode_cursor,
     encode_cursor,
 )
-from mcp_server.document_text.cache import DocumentTextCache
-from mcp_server.settings import get_mcp_settings
+from server.document_text.cache import DocumentTextCache
+from server.settings import get_mcp_settings
 
 JsonDict = dict[str, Any]
 

@@ -1,11 +1,11 @@
 """Command-line interface for Cloudzy VPS provisioning and destruction.
 
-Runnable as ``python -m legal_deploy.cloudzy_cli``. Every subcommand prints
+Runnable as ``python -m deploy.cloudzy_cli``. Every subcommand prints
 exactly one JSON document to stdout, including a normalized error envelope on
 failure (a non-zero exit still prints a JSON document). This mirrors the legal
 pipeline CLI's one-JSON-document-to-stdout convention.
 
-This is standalone deploy tooling. It builds on :mod:`legal_deploy.cloudzy` and
+This is standalone deploy tooling. It builds on :mod:`deploy.cloudzy` and
 does not import the legal pipeline's source-access internals.
 
 ``--dry-run`` is a global flag accepted by every subcommand. In dry-run mode no
@@ -23,7 +23,7 @@ import json
 import sys
 from typing import Any, Sequence
 
-from legal_deploy.cloudzy import (
+from deploy.cloudzy import (
     TOKEN_ENV_VAR,
     CloudzyClient,
     CloudzyError,

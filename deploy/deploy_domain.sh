@@ -4,7 +4,7 @@
 # domain with automatic HTTPS (Caddy + Let's Encrypt).
 #
 # This is the always-on counterpart to the ngrok-based orchestrator
-# (`python -m legal_deploy.deploy`). It deploys the combined ASGI app
+# (`python -m deploy.deploy`). It deploys the combined ASGI app
 # (`api.main:app`) to an existing SSH-reachable VPS and fronts it with Caddy on
 # a stable domain (default: mcp.arglegal.live). The result is a stable MCP URL
 # `https://<domain>/mcp` you paste into a Claude Cowork connector.
@@ -25,8 +25,8 @@
 # obtain a certificate until it does.
 #
 # Usage:
-#   legal_deploy/deploy_domain.sh --host <ip> [--domain mcp.arglegal.live] [opts]
-#   legal_deploy/deploy_domain.sh --dry-run            # render plan, no SSH
+#   deploy/deploy_domain.sh --host <ip> [--domain mcp.arglegal.live] [opts]
+#   deploy/deploy_domain.sh --dry-run            # render plan, no SSH
 #
 # Secrets: sourced from a local KEY=VALUE file (default
 # ~/.config/legal-agent/deploy.env, chmod 600). See deploy.env.example. Required
@@ -168,7 +168,7 @@ fi
 # ----------------------------------------------------------------------------
 # Load secrets from the local deploy env file (never printed).
 # ----------------------------------------------------------------------------
-[ -f "$DEPLOY_ENV" ] || die "deploy env file not found: $DEPLOY_ENV (see legal_deploy/deploy.env.example)"
+[ -f "$DEPLOY_ENV" ] || die "deploy env file not found: $DEPLOY_ENV (see deploy/deploy.env.example)"
 perms="$(stat -c '%a' "$DEPLOY_ENV" 2>/dev/null || echo '')"
 [ "$perms" = "600" ] || log "WARNING: $DEPLOY_ENV is mode ${perms:-?}; recommend chmod 600"
 set -a
@@ -215,7 +215,7 @@ log "writing remote env file ${REMOTE_ENV_FILE}"
 tmp_env="$(umask 077; mktemp)"
 trap 'rm -f "$tmp_env"' EXIT
 {
-  echo "# Rendered by legal_deploy/deploy_domain.sh — do not commit. chmod 600."
+  echo "# Rendered by deploy/deploy_domain.sh — do not commit. chmod 600."
   echo "LEGAL_MCP_AUTH_ENABLED=true"
   echo "LEGAL_MCP_PUBLIC_URL=${PUBLIC_URL}"
   echo "LEGAL_MCP_OAUTH_ISSUER=${ISSUER}"

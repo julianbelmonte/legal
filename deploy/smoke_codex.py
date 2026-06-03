@@ -1,6 +1,6 @@
 """Remote smoke test that drives Codex CLI against a deployed MCP server.
 
-Runnable as ``python -m legal_deploy.smoke_codex``. Before testing Claude
+Runnable as ``python -m deploy.smoke_codex``. Before testing Claude
 Cowork, the deployed remote MCP server (the ``/mcp`` streamable-HTTP endpoint
 fronted by ngrok) should be exercised from this machine through an agent CLI.
 This command does exactly that: it writes a **temporary** Codex MCP config
@@ -13,7 +13,7 @@ the Codex CLI to
 
 Captured stdout/stderr is returned for diagnosis. Secrets (the bearer token)
 are **never** printed: every reportable rendering of the config or environment
-runs the token through :func:`legal_deploy.secrets.redact_secret`.
+runs the token through :func:`deploy.secrets.redact_secret`.
 
 ``--dry-run`` renders the PLAN -- the temp config that *would* be written (with
 the token redacted), the codex command(s) that *would* run, and the smoke steps
@@ -40,7 +40,7 @@ import time
 from pathlib import Path
 from typing import Any, Sequence
 
-from legal_deploy.secrets import redact_secret
+from deploy.secrets import redact_secret
 
 #: Env var the bearer token is read from when ``--bearer-token`` is not given.
 BEARER_TOKEN_ENV_VAR = "LEGAL_MCP_BEARER_TOKEN"
@@ -54,7 +54,7 @@ SIGNING_KEY_ENV_VAR = "LEGAL_MCP_OAUTH_SIGNING_KEY"
 ALLOWED_EMAILS_ENV_VAR = "LEGAL_MCP_ALLOWED_EMAILS"
 ISSUER_ENV_VAR = "LEGAL_MCP_OAUTH_ISSUER"
 
-#: JWT signing algorithm (matches mcp_server.auth.provider).
+#: JWT signing algorithm (matches server.auth.provider).
 _JWT_ALG = "HS256"
 #: TTL (seconds) for an auto-minted smoke token.
 _MINT_TTL_SECONDS = 3600
@@ -89,7 +89,7 @@ def mint_bearer_token(
 ) -> str:
     """Mint a signed JWT bearer token matching the deployed server's config.
 
-    The claim shape mirrors :class:`mcp_server.auth.provider.SingleUserOAuthProvider`
+    The claim shape mirrors :class:`server.auth.provider.SingleUserOAuthProvider`
     so the deployed server's ``decode_token`` (validating signature, ``aud`` =
     resource, ``iss`` = issuer, ``exp``, and the email allowlist) accepts it.
     """
@@ -115,7 +115,7 @@ def auto_mint_from_state_or_env(server_url: str) -> str | None:
 
     1. Env vars ``LEGAL_MCP_OAUTH_SIGNING_KEY`` + ``LEGAL_MCP_ALLOWED_EMAILS``
        (issuer/resource derived from env or ``server_url``).
-    2. The local deploy-state.json written by ``legal_deploy.deploy`` (its
+    2. The local deploy-state.json written by ``deploy.deploy`` (its
        recorded signing key, allowed email, issuer and resource).
 
     Returns ``None`` when no signing material is available (the caller then runs
@@ -497,7 +497,7 @@ def run_smoke(
     if not all_ok:
         envelope["diagnostics_to_collect"] = [
             "service logs (systemd journal for the api/mcp unit)",
-            "ngrok status (legal_deploy.ngrok.discover_public_url / agent API)",
+            "ngrok status (deploy.ngrok.discover_public_url / agent API)",
             "OAuth metadata (.well-known/oauth-authorization-server)",
             "MCP challenge response (401 WWW-Authenticate on /mcp)",
         ]

@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from mcp_server.auth.metadata import (
+from server.auth.metadata import (
     AUTHORIZATION_PATH,
     REGISTRATION_PATH,
     TOKEN_PATH,
     authorization_server_metadata,
     protected_resource_metadata,
 )
-from mcp_server.settings import McpSettings
+from server.settings import McpSettings
 
 PUBLIC_URL = "https://example.ngrok.app/mcp"
 ISSUER = "https://example.ngrok.app"

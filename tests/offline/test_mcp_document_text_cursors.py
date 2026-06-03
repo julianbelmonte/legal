@@ -6,14 +6,14 @@ from pathlib import Path
 
 import pytest
 
-from mcp_server.document_text.cache import DocumentTextCache
-from mcp_server.document_text.cursors import (
+from server.document_text.cache import DocumentTextCache
+from server.document_text.cursors import (
     DOCUMENT_TEXT_OPERATION,
     DocumentTextCursorError,
     decode_document_text_cursor,
     make_document_text_cursor,
 )
-from mcp_server.settings import get_mcp_settings
+from server.settings import get_mcp_settings
 
 
 def test_cursor_round_trip() -> None:

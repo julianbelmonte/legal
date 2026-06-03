@@ -13,7 +13,7 @@ without a bearer token) and the bearer-protected ``/mcp`` transport, so the same
 factory can run standalone or be mounted beside the API (see
 ``api.main.create_app``). Run the standalone MCP app locally with::
 
-    uv run python -m mcp_server.main
+    uv run python -m server.main
 """
 
 from __future__ import annotations
@@ -33,10 +33,10 @@ from starlette.responses import FileResponse, PlainTextResponse
 from starlette.routing import Mount, Route
 from starlette.types import ASGIApp
 
-from mcp_server.auth.routes import build_oauth_routes
-from mcp_server.auth.transport import BearerAuthMiddleware
-from mcp_server.settings import McpSettings, load_settings
-from mcp_server.tools import (
+from server.auth.routes import build_oauth_routes
+from server.auth.transport import BearerAuthMiddleware
+from server.settings import McpSettings, load_settings
+from server.tools import (
     legal_find_in_document_text,
     legal_get_document_text,
     legal_get_document_text_page,
@@ -221,7 +221,7 @@ def build_mcp_asgi_app(settings: McpSettings | None = None) -> ASGIApp:
 
     Builds the FastMCP streamable transport (endpoint at ``/`` so it mounts
     cleanly at ``/mcp``) and wraps it in
-    :class:`~mcp_server.auth.transport.BearerAuthMiddleware`. The middleware
+    :class:`~server.auth.transport.BearerAuthMiddleware`. The middleware
     only challenges requests under the configured MCP path, so when the inner
     app is mounted at ``/mcp`` the guard protects ``/mcp`` while leaving the
     health and OAuth surfaces open.

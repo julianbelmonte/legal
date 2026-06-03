@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from legal_deploy.bootstrap import (
+from deploy.bootstrap import (
     DEFAULT_APP_PORT,
     VENDOR_BOOTSTRAP_REL,
     render_bootstrap_script,

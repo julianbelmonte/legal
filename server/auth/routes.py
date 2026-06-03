@@ -4,7 +4,7 @@ This module builds the unauthenticated OAuth surface that remote MCP clients
 (e.g. Claude Cowork) hit *before* they hold a bearer token:
 
 - the two well-known discovery documents (RFC 8414 / RFC 9728) served from
-  :mod:`mcp_server.auth.metadata`;
+  :mod:`server.auth.metadata`;
 - ``POST /oauth/register`` — minimal dynamic client registration (RFC 7591)
   that echoes back a client id (public PKCE clients carry no secret);
 - ``GET /oauth/authorize`` — a minimal single-user login/consent form;
@@ -14,13 +14,13 @@ This module builds the unauthenticated OAuth surface that remote MCP clients
 - ``POST /oauth/token`` — exchanges the authorization code (+ PKCE verifier)
   for a signed JWT access token.
 
-The flow is implemented with :class:`~mcp_server.auth.provider.SingleUserOAuthProvider`,
+The flow is implemented with :class:`~server.auth.provider.SingleUserOAuthProvider`,
 so it inherits PKCE (``S256``), the email allowlist, the login-secret gate, and
 the constant-time comparisons defined there. These routes are intentionally
-reachable without a bearer token; :class:`~mcp_server.auth.transport.BearerAuthMiddleware`
+reachable without a bearer token; :class:`~server.auth.transport.BearerAuthMiddleware`
 whitelists the ``/.well-known/`` and ``/oauth/`` prefixes.
 
-A single :class:`~mcp_server.auth.provider.SingleUserOAuthProvider` instance is
+A single :class:`~server.auth.provider.SingleUserOAuthProvider` instance is
 shared between these routes and the transport guard so issued authorization
 codes are visible to the token endpoint.
 """
@@ -36,7 +36,7 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from starlette.routing import Route
 
-from mcp_server.auth.metadata import (
+from server.auth.metadata import (
     AUTHORIZATION_PATH,
     AUTHORIZATION_SERVER_METADATA_PATH,
     PROTECTED_RESOURCE_METADATA_PATH,
@@ -45,9 +45,9 @@ from mcp_server.auth.metadata import (
     authorization_server_metadata,
     protected_resource_metadata,
 )
-from mcp_server.auth.models import DEFAULT_SCOPE
-from mcp_server.auth.provider import OAuthProviderError, SingleUserOAuthProvider
-from mcp_server.settings import McpSettings, get_mcp_settings
+from server.auth.models import DEFAULT_SCOPE
+from server.auth.provider import OAuthProviderError, SingleUserOAuthProvider
+from server.settings import McpSettings, get_mcp_settings
 
 ProviderFactory = Callable[[], SingleUserOAuthProvider]
 

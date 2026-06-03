@@ -22,7 +22,7 @@ import legal.registry
 import legal.schema
 from legal.errors import not_found
 
-from mcp_server.serialization import to_jsonable
+from server.serialization import to_jsonable
 
 
 def legal_sources() -> dict[str, Any]:

@@ -10,7 +10,7 @@ IMPORTANT: only extracted text and metadata are stored. Raw PDF bytes are never
 written here — the document text resolvers extract text before caching.
 
 Records carry a TTL whose default comes from the step-04 MCP settings
-(``mcp_server.settings.McpSettings.cache_ttl_seconds``). Cache id, source,
+(``server.settings.McpSettings.cache_ttl_seconds``). Cache id, source,
 document reference, query hash, title/date/url metadata, full extracted text,
 created/expiry timestamps, and provenance are all retained per record.
 """
@@ -32,7 +32,7 @@ from legal.cache import (
     get_cache_dir,
 )
 from legal.cache import query_hash as _query_hash
-from mcp_server.settings import get_mcp_settings
+from server.settings import get_mcp_settings
 
 JsonDict = dict[str, Any]
 

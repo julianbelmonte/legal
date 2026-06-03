@@ -1,6 +1,6 @@
 """Offline tests for the MCP transport bearer-auth guard.
 
-Exercises :class:`mcp_server.auth.transport.BearerAuthMiddleware` directly with
+Exercises :class:`server.auth.transport.BearerAuthMiddleware` directly with
 a minimal Starlette app and TestClient (starlette ships with fastapi). Verifies
 the 401 + ``WWW-Authenticate`` challenge for every rejected token shape and that
 ``/healthz`` plus the OAuth metadata endpoints stay reachable unauthenticated.
@@ -17,20 +17,20 @@ from starlette.responses import JSONResponse, PlainTextResponse
 from starlette.routing import Route
 from starlette.testclient import TestClient
 
-from mcp_server.auth.metadata import (
+from server.auth.metadata import (
     PROTECTED_RESOURCE_METADATA_PATH,
     authorization_server_metadata,
     protected_resource_metadata,
 )
-from mcp_server.auth.models import TokenClaims
-from mcp_server.auth.provider import SingleUserOAuthProvider
-from mcp_server.auth.transport import (
+from server.auth.models import TokenClaims
+from server.auth.provider import SingleUserOAuthProvider
+from server.auth.transport import (
     BearerAuthMiddleware,
     build_www_authenticate,
     extract_bearer_token,
     get_token_claims,
 )
-from mcp_server.settings import McpSettings
+from server.settings import McpSettings
 
 EMAIL = "user@example.com"
 SECRET = "test-secret"

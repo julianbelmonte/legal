@@ -28,17 +28,17 @@ import secrets
 import pytest
 from starlette.testclient import TestClient
 
-from mcp_server.auth.metadata import (
+from server.auth.metadata import (
     AUTHORIZATION_PATH,
     AUTHORIZATION_SERVER_METADATA_PATH,
     PROTECTED_RESOURCE_METADATA_PATH,
     TOKEN_PATH,
 )
-from mcp_server.auth.provider import (
+from server.auth.provider import (
     SingleUserOAuthProvider,
     compute_s256_challenge,
 )
-from mcp_server.settings import get_mcp_settings, reload_mcp_settings
+from server.settings import get_mcp_settings, reload_mcp_settings
 
 EMAIL = "user@example.com"
 SECRET = "test-secret"

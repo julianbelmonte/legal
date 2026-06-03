@@ -10,8 +10,8 @@ from __future__ import annotations
 
 import legal.registry
 import legal.schema
-from mcp_server.tools import legal_schema, legal_source, legal_sources
-from mcp_server.tools import discovery
+from server.tools import legal_schema, legal_source, legal_sources
+from server.tools import discovery
 
 
 def test_legal_sources_mirrors_registry() -> None:

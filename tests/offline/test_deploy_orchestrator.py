@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from legal_deploy import deploy
+from deploy import deploy
 
 
 SECRET_TOKEN = "cz_supersecret_token_value_1234567890"

@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from mcp_server.document_text.cache import DocumentTextCache, DocumentTextRecord
+from server.document_text.cache import DocumentTextCache, DocumentTextRecord
 
 
 def test_put_get_round_trip(tmp_path: Path) -> None:

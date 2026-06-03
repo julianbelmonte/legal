@@ -4,14 +4,14 @@
 single document's text over MCP. It wires together the prior building blocks and
 adds no source-access logic of its own:
 
-- :mod:`mcp_server.document_text.resolvers` maps a source id onto the existing
+- :mod:`server.document_text.resolvers` maps a source id onto the existing
   pipeline operation that fetches the document (dispatched through
   ``legal.dispatch.run_operation``) and declares how text/metadata/url are read
   out of the normalized envelope.
-- :mod:`mcp_server.document_text.cache` stores the full extracted text plus its
+- :mod:`server.document_text.cache` stores the full extracted text plus its
   metadata under a TTL record, so subsequent page reads never refetch or
   re-extract a large document.
-- :mod:`mcp_server.document_text.cursors` mints the opaque cursors that resume
+- :mod:`server.document_text.cursors` mints the opaque cursors that resume
   reading at a character offset.
 
 The MCP surface never exposes raw PDF bytes or filesystem save paths. The
@@ -28,18 +28,18 @@ from __future__ import annotations
 from typing import Any, Mapping
 
 from legal.cache import query_hash as _query_hash
-from mcp_server.document_text.cache import DocumentTextCache, DocumentTextRecord
-from mcp_server.document_text.cursors import (
+from server.document_text.cache import DocumentTextCache, DocumentTextRecord
+from server.document_text.cursors import (
     DocumentTextCursorError,
     decode_document_text_cursor,
     make_document_text_cursor,
 )
-from mcp_server.document_text.resolvers import (
+from server.document_text.resolvers import (
     document_text_error,
     get_document_text_resolver,
 )
-from mcp_server.serialization import SerializationError, error_envelope, to_jsonable
-from mcp_server.settings import get_mcp_settings
+from server.serialization import SerializationError, error_envelope, to_jsonable
+from server.settings import get_mcp_settings
 
 __all__ = [
     "DOCUMENT_TEXT_TOOL_OPERATION",

@@ -1,11 +1,11 @@
-"""Offline tests for legal_deploy.ngrok URL helpers and tunnel discovery."""
+"""Offline tests for deploy.ngrok URL helpers and tunnel discovery."""
 
 from __future__ import annotations
 
 import httpx
 import pytest
 
-from legal_deploy import ngrok
+from deploy import ngrok
 
 
 # --- mcp_url_from_tunnel_url ------------------------------------------------
