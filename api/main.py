@@ -20,14 +20,20 @@ Run locally with::
 from __future__ import annotations
 
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 
 from legal.errors import LegalCliError
 
 from api.errors import error_to_envelope
 from api.routers import csjn, discovery, generic, saij, search
 from mcp_server.auth.routes import build_oauth_routes
-from mcp_server.main import build_mcp_asgi_components, mcp_lifespan
+from mcp_server.main import (
+    ICON_FILE,
+    ICON_MIME,
+    ICON_ROUTE_PATH,
+    build_mcp_asgi_components,
+    mcp_lifespan,
+)
 
 DESCRIPTION = (
     "Uniform HTTP access to Argentina legal research data sources. Every "
@@ -71,6 +77,19 @@ def create_app() -> FastAPI:
     def healthz() -> dict[str, object]:
         """Unauthenticated liveness probe."""
         return {"ok": True, "service": "legal-api"}
+
+    @app.get(ICON_ROUTE_PATH, include_in_schema=False)
+    def icon() -> FileResponse:
+        """Serve the server branding icon (unauthenticated, cacheable).
+
+        MCP clients fetch the icon advertised in ``serverInfo.icons`` from this
+        absolute URL under the public origin.
+        """
+        return FileResponse(
+            ICON_FILE,
+            media_type=ICON_MIME,
+            headers={"Cache-Control": "public, max-age=86400"},
+        )
 
     app.include_router(discovery.router)
     app.include_router(generic.router)

@@ -37,6 +37,8 @@ def test_authorization_server_metadata_shape() -> None:
     assert md["code_challenge_methods_supported"] == ["S256"]
     assert "authorization_code" in md["grant_types_supported"]
     assert md["response_types_supported"] == ["code"]
+    # Branding logo derives from the issuer origin (path stripped).
+    assert md["logo_uri"] == ISSUER + "/icon.png"
 
 
 def test_endpoints_derive_from_issuer_no_caching() -> None:

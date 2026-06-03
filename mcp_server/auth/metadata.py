@@ -19,8 +19,21 @@ concrete endpoint paths defined here are the contract that steps 19/20 mount.
 
 from __future__ import annotations
 
+from urllib.parse import urlsplit
+
 from mcp_server.auth.models import DEFAULT_SCOPE
 from mcp_server.settings import McpSettings, get_mcp_settings
+
+# Path (relative to the public origin) of the unauthenticated branding icon.
+ICON_PATH = "/icon.png"
+
+
+def _origin(url: str) -> str:
+    """Return the scheme://host[:port] origin of ``url`` (path stripped)."""
+    parsed = urlsplit(url)
+    if parsed.scheme and parsed.netloc:
+        return f"{parsed.scheme}://{parsed.netloc}"
+    return url.rstrip("/")
 
 # Concrete OAuth endpoint paths, appended to the issuer. Steps 19/20 mount the
 # routes at exactly these paths so discovery and serving stay consistent.
@@ -78,6 +91,8 @@ def authorization_server_metadata(
         "code_challenge_methods_supported": ["S256"],
         "token_endpoint_auth_methods_supported": ["none"],
         "scopes_supported": [DEFAULT_SCOPE],
+        # Branding shown by clients that render the authorization server's logo.
+        "logo_uri": _origin(issuer) + ICON_PATH,
     }
 
 

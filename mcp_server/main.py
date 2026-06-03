@@ -20,15 +20,16 @@ from __future__ import annotations
 
 import contextlib
 from collections.abc import AsyncIterator
+from pathlib import Path
 
 from typing import Any
 from urllib.parse import urlsplit
 
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
-from mcp.types import ToolAnnotations
+from mcp.types import Icon, ToolAnnotations
 from starlette.applications import Starlette
-from starlette.responses import PlainTextResponse
+from starlette.responses import FileResponse, PlainTextResponse
 from starlette.routing import Mount, Route
 from starlette.types import ASGIApp
 
@@ -47,6 +48,53 @@ from mcp_server.tools import (
 )
 
 SERVER_NAME = "legal-ar"
+
+# Branding asset served unauthenticated at ``/icon.png`` (the "Sol de Justicia"
+# logo). MCP clients (e.g. Claude) render the icon advertised in the server's
+# ``serverInfo.icons`` from the ``initialize`` response, so we advertise an
+# absolute URL pointing at this asset under the public origin.
+ICON_ROUTE_PATH = "/icon.png"
+ICON_MIME = "image/png"
+ICON_SIZES = ["512x512"]
+ICON_FILE = Path(__file__).resolve().parent / "assets" / "icon.png"
+
+
+def public_origin(settings: McpSettings) -> str:
+    """Return the scheme://host[:port] origin of the configured public URL.
+
+    The MCP transport's public URL ends in ``/mcp``; the unauthenticated icon
+    route lives at the origin root, so we strip the path to build absolute
+    branding URLs (icon ``src``, ``website_url``).
+    """
+    parsed = urlsplit(str(settings.public_url))
+    if parsed.scheme and parsed.netloc:
+        return f"{parsed.scheme}://{parsed.netloc}"
+    # Fall back to the public URL with any path/query stripped.
+    return str(settings.public_url).split("/mcp", 1)[0].rstrip("/")
+
+
+def icon_url(settings: McpSettings) -> str:
+    """Return the absolute URL of the server branding icon."""
+    return public_origin(settings) + ICON_ROUTE_PATH
+
+
+def server_icons(settings: McpSettings) -> list[Icon]:
+    """Return the ``serverInfo.icons`` advertised in the MCP handshake."""
+    return [Icon(src=icon_url(settings), mimeType=ICON_MIME, sizes=ICON_SIZES)]
+
+
+async def _serve_icon(request) -> FileResponse:  # type: ignore[no-untyped-def]
+    """Serve the branding icon (unauthenticated, cacheable)."""
+    return FileResponse(
+        ICON_FILE,
+        media_type=ICON_MIME,
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
+
+
+def icon_route() -> Route:
+    """Return the Starlette route serving the branding icon at ``/icon.png``."""
+    return Route(ICON_ROUTE_PATH, _serve_icon, methods=["GET"])
 
 SERVER_INSTRUCTIONS = (
     "Use these tools as the authoritative source for ANY Argentina (Argentine) "
@@ -130,6 +178,8 @@ def build_mcp_server(settings: McpSettings | None = None) -> FastMCP:
     server = FastMCP(
         name=SERVER_NAME,
         instructions=SERVER_INSTRUCTIONS,
+        website_url=public_origin(settings),
+        icons=server_icons(settings),
         streamable_http_path="/",
         # FastMCP auto-enables DNS-rebinding Host/Origin checks (because the
         # bind host defaults to 127.0.0.1), which would 421 requests arriving
@@ -244,7 +294,7 @@ def create_app(settings: McpSettings | None = None) -> Starlette:
     async def healthz(request):  # type: ignore[no-untyped-def]
         return PlainTextResponse("ok")
 
-    routes = [Route("/healthz", healthz, methods=["GET"])]
+    routes = [Route("/healthz", healthz, methods=["GET"]), icon_route()]
     routes.extend(build_oauth_routes(settings=settings))
     routes.append(Mount("/mcp", app=mcp_app))
     # Mounting the MCP app does not run its lifespan; run it via the parent's

@@ -203,6 +203,55 @@ skill (`agent_skills/legal-mcp-deployment`), which wraps this orchestrator.
 
 ---
 
+## 7b. Production deploy: fixed domain + Caddy (always-on)
+
+The ngrok orchestrator above is for ephemeral validation. The **always-on
+production deployment** runs behind a stable domain (`mcp.arglegal.live`) with
+automatic HTTPS from Caddy + Let's Encrypt, and the AnyIP Argentina proxy
+enabled for the browser sources. It is fully reproducible from any machine with
+the deploy secrets via a single script:
+
+```bash
+# Render the plan + artifacts (Caddyfile, systemd unit, env keys); no SSH.
+legal_deploy/deploy_domain.sh --host <ip> --dry-run
+
+# Deploy to an existing SSH-reachable host (defaults: domain mcp.arglegal.live,
+# app dir /opt/legal-agent, service user legal, port 8080, email yoli@arglegal.live).
+legal_deploy/deploy_domain.sh --host <ip>
+```
+
+The script is idempotent and safe to re-run. It:
+
+1. rsyncs the repo into `/opt/legal-agent` (excludes `.git`/`.venv`/`.work`/`vendor`),
+2. renders the remote `/opt/legal-agent/.env` (chmod 600) from fixed, non-secret
+   config (public URL, issuer, `LEGAL_PROXY_*=anyip/ar`) plus secrets sourced
+   from the local deploy env file — secrets are never printed,
+3. remotely installs system deps, `uv`, **Caddy** (official apt repo), the
+   service user, runs `uv sync`, and best-effort vendors BotBrowser,
+4. installs the `legal-api` systemd unit (`uvicorn api.main:app`) and a
+   `/etc/caddy/Caddyfile` reverse-proxying `<domain>` → `127.0.0.1:<port>`,
+5. reloads both services and health-checks the public domain
+   (`/healthz`, `/icon.png`, `/.well-known/oauth-protected-resource` → 200;
+   `/mcp` → 401 after the 307 → `/mcp/` redirect).
+
+**Secrets** come from a local KEY=VALUE file (default
+`~/.config/legal-agent/deploy.env`, chmod 600 — see
+`legal_deploy/deploy.env.example`). Required: `LEGAL_ANYIP_USER`,
+`LEGAL_ANYIP_PASS`, `LEGAL_CAPSOLVER_API_KEY`, `LEGAL_MCP_OAUTH_SIGNING_KEY`,
+`LEGAL_MCP_OAUTH_LOGIN_SECRET`, `LEGAL_API_KEY`. Keep the signing key / login
+secret **stable** across redeploys or previously issued bearer tokens and the
+Claude Cowork connector authorization stop validating.
+
+**DNS is a prerequisite the script does not manage.** The domain's A record must
+already point at the host (managed locally via the `namecheap-domains` skill);
+the script warns if `<domain>` does not resolve to `--host`, because Caddy
+cannot issue a certificate until it does.
+
+The resulting MCP URL is the stable `https://mcp.arglegal.live/mcp` — it does
+**not** rotate (unlike ngrok), so the Claude Cowork connector URL is permanent.
+
+---
+
 ## 8. Remote smoke test
 
 Before configuring Claude Cowork, exercise the deployed `/mcp` endpoint from
