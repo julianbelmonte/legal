@@ -682,6 +682,35 @@ def _make_client() -> LegalHttpClient:
     )
 
 
+def _build_texto_query(text: str) -> str:
+    """Build a relevance-friendly SAIJ ``texto`` raw query from free text.
+
+    ``texto:<words>`` makes SAIJ AND only the first token into the ``texto``
+    field and OR the rest into the default ``contenido`` field, so a multi-term
+    query matches almost everything and ranks by recency. Instead we AND every
+    term inside ``texto`` (``texto:(a AND b AND ...)``), which SAIJ expands to
+    ``+texto:a +texto:b ...`` — every term required, results ranked by score.
+    Quoted phrases in the input are preserved as phrase matches.
+    """
+    import shlex
+
+    try:
+        tokens = shlex.split(text)
+    except ValueError:
+        tokens = text.split()
+    parts: list[str] = []
+    for token in tokens:
+        token = token.strip()
+        if not token:
+            continue
+        parts.append(f'"{token}"' if " " in token else token)
+    if not parts:
+        return f"texto:{text}"
+    if len(parts) == 1:
+        return f"texto:{parts[0]}"
+    return "texto:(" + " AND ".join(parts) + ")"
+
+
 def _query_from_args(args: argparse.Namespace, *, cursor_payload: Mapping[str, Any]) -> JsonDict:
     raw = cursor_payload.get("raw") if cursor_payload else None
     if isinstance(raw, Mapping) and isinstance(raw.get("query"), Mapping):
@@ -692,7 +721,7 @@ def _query_from_args(args: argparse.Namespace, *, cursor_payload: Mapping[str, A
     if raw_query is None:
         if text is None:
             raise usage_error("either --text or --raw-query is required")
-        raw_query = f"texto:{text}"
+        raw_query = _build_texto_query(text)
 
     document_type = _optional_text(args.document_type)
     facets = _facets_with_type(args.facets, document_type=document_type)

@@ -205,6 +205,31 @@ def _source_operation(source_id: str, operation: str) -> SourceOperation:
     return adapter.get_operation(operation) or default_operation(source, operation)
 
 
+# Sources that have no generic ``search`` op but expose a search-like operation
+# the global fan-out can route to. These are browser-backed (slow/probabilistic),
+# so they only enter the fan-out when the caller lists them explicitly — never
+# under ``all_direct`` (which stays fast/direct-only).
+_GLOBAL_SEARCH_OP_ALIASES = {"csjn": "fallos"}
+
+
+def _global_search_op_name(source_id: str) -> str | None:
+    """Return the operation the global fan-out should call for *source_id*.
+
+    ``"search"`` when the source exposes it, the configured alias (e.g.
+    ``csjn`` → ``fallos``) when present, otherwise ``None`` (the source cannot
+    participate in the fan-out and is skipped with a warning by the caller).
+    """
+    source = next((s for s in SOURCES if s.id == source_id), None)
+    if source is None:
+        return None
+    if "search" in source.operations:
+        return "search"
+    alias = _GLOBAL_SEARCH_OP_ALIASES.get(source_id)
+    if alias and alias in source.operations:
+        return alias
+    return None
+
+
 def _select_global_search_sources(args: argparse.Namespace) -> list[str]:
     if args.all_direct:
         return [
@@ -221,12 +246,9 @@ def _select_global_search_sources(args: argparse.Namespace) -> list[str]:
                 f"unknown source: {source_id}",
                 details={"source": source_id, "known_sources": list(SOURCE_IDS)},
             )
-        source = next(source for source in SOURCES if source.id == source_id)
-        if source.browser_required or "search" not in source.operations:
-            raise usage_error(
-                f"{source_id} does not expose a direct search operation",
-                details={"source": source_id},
-            )
+        # Non-searchable sources are no longer rejected here: the fan-out skips
+        # them gracefully and reports them in facets.source_errors, so one
+        # unsearchable source never aborts the whole search.
         if source_id not in selected:
             selected.append(source_id)
     if not selected:
@@ -272,7 +294,7 @@ def _source_text_option(parser: argparse.ArgumentParser) -> str | None:
         for action in parser._actions
         for option in action.option_strings
     }
-    for option in ("--text", "--q", "--words", "--phrase"):
+    for option in ("--text", "--texto", "--q", "--words", "--phrase"):
         if option in options:
             return option
     return None

@@ -21,6 +21,7 @@ from typing import Any
 from legal.cli import (
     _build_global_source_search_args,
     _extend_unique,
+    _global_search_op_name,
     _mapping_or_empty,
     _result_payload,
     _select_global_search_sources,
@@ -73,8 +74,27 @@ def run_global_search(
     success_count = 0
 
     for source_id in source_ids:
+        op_name = _global_search_op_name(source_id)
+        if op_name is None:
+            # Source has no search-like operation (e.g. download-only, or a
+            # browser source with no mapped search op). Skip gracefully and
+            # report it instead of aborting the whole fan-out.
+            skip_error = LegalError(
+                code="unsupported_operation",
+                message=f"{source_id} does not support search",
+                retryable=False,
+                details={"source": source_id},
+            )
+            source_errors[source_id] = skip_error.to_dict()
+            source_results[source_id] = {
+                "ok": False,
+                "error": skip_error.to_dict(),
+                "warnings": [],
+            }
+            warnings.append(f"{source_id} skipped: no search operation")
+            continue
         try:
-            operation = _source_operation(source_id, "search")
+            operation = _source_operation(source_id, op_name)
             source_args = _build_global_source_search_args(
                 source_id=source_id,
                 operation=operation,
