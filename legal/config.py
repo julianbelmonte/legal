@@ -113,6 +113,32 @@ def floxy_pass() -> str:
     return str(value)
 
 
+def anyip_user() -> str:
+    """Return the AnyIP proxy username from env, secret.py, or local config."""
+
+    value = _secret_value("ANYIP_USER")
+    if value is None:
+        raise RuntimeError(
+            "AnyIP user is not configured. Set LEGAL_ANYIP_USER "
+            "or add ANYIP_USER to legal/secret.py "
+            "(copy legal/secret.example.py)."
+        )
+    return str(value)
+
+
+def anyip_pass() -> str:
+    """Return the AnyIP proxy password from env, secret.py, or local config."""
+
+    value = _secret_value("ANYIP_PASS")
+    if value is None:
+        raise RuntimeError(
+            "AnyIP pass is not configured. Set LEGAL_ANYIP_PASS "
+            "or add ANYIP_PASS to legal/secret.py "
+            "(copy legal/secret.example.py)."
+        )
+    return str(value)
+
+
 def botbrowser_bin() -> Path:
     """Return the BotBrowser Chromium executable path."""
 
@@ -196,6 +222,8 @@ __all__ = [
     "capsolver_api_key",
     "floxy_user",
     "floxy_pass",
+    "anyip_user",
+    "anyip_pass",
     "botbrowser_bin",
     "botbrowser_profiles_dir",
     "pick_profile",

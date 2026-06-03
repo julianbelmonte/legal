@@ -18,6 +18,7 @@ from .base import (
     parse_proxy_for_playwright,
     parse_proxy_url,
 )
+from .anyip import AnyIPBackend
 from .floxy import FloxyBackend
 from .none import NullProxyBackend
 
@@ -28,6 +29,7 @@ def _register(backend: ProxyBackend) -> None:
     _BACKENDS[backend.name] = backend
 
 
+_register(AnyIPBackend())
 _register(FloxyBackend())
 _register(NullProxyBackend())
 
@@ -87,6 +89,7 @@ def resolve_proxy_for_playwright(session: str | None = None) -> dict | None:
 
 
 __all__ = [
+    "AnyIPBackend",
     "FloxyBackend",
     "NullProxyBackend",
     "ProxyBackend",
