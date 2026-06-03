@@ -74,7 +74,7 @@ def run_global_search(
     success_count = 0
 
     for source_id in source_ids:
-        op_name = _global_search_op_name(source_id)
+        op_name = _global_search_op_name(source_id, text)
         if op_name is None:
             # Source has no search-like operation (e.g. download-only, or a
             # browser source with no mapped search op). Skip gracefully and

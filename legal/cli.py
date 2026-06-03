@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 from collections.abc import Mapping
 from dataclasses import replace
@@ -221,18 +222,34 @@ _GLOBAL_SEARCH_BROWSER_INCLUDE = {"csjn"}
 _GLOBAL_SEARCH_ALL_DIRECT_EXCLUDE = {"ptn"}
 
 
-def _global_search_op_name(source_id: str) -> str | None:
+# Official "Fallos" citation, volume:page (e.g. "327:327", "Fallos 272:188").
+# Anchored to a 2-3 digit volume + 1-4 digit page so it does not match ordinary
+# numbers; CSJN sumarios index the citation, so such queries route there.
+_FALLOS_CITATION_RE = re.compile(r"\b(?:fallos?\s*)?\d{2,3}\s*:\s*\d{1,4}\b", re.IGNORECASE)
+
+
+def _is_fallos_citation(text: str | None) -> bool:
+    return bool(text and _FALLOS_CITATION_RE.search(text))
+
+
+def _global_search_op_name(source_id: str, text: str = "") -> str | None:
     """Return the operation the global fan-out should call for *source_id*.
 
-    ``"search"`` when the source exposes it, the configured alias (e.g.
-    ``csjn`` → ``fallos``) when present, otherwise ``None`` (the source cannot
-    participate in the fan-out and is skipped with a warning by the caller).
+    ``"search"`` when the source exposes it; for ``csjn`` a Fallos-citation
+    query (volume:page) routes to ``sumarios`` (which index the citation) and
+    everything else to ``fallos``; the configured alias otherwise. ``None`` when
+    the source cannot participate (skipped with a warning by the caller).
     """
     source = next((s for s in SOURCES if s.id == source_id), None)
     if source is None:
         return None
     if "search" in source.operations:
         return "search"
+    if source_id == "csjn":
+        if _is_fallos_citation(text) and "sumarios" in source.operations:
+            return "sumarios"
+        if "fallos" in source.operations:
+            return "fallos"
     alias = _GLOBAL_SEARCH_OP_ALIASES.get(source_id)
     if alias and alias in source.operations:
         return alias
