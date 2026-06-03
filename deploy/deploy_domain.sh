@@ -94,7 +94,10 @@ SSH_OPTS=(-o StrictHostKeyChecking=accept-new -o ConnectTimeout=20)
 [ -n "$SSH_KEY" ] && SSH_OPTS+=(-i "$SSH_KEY")
 ssh_run() { ssh "${SSH_OPTS[@]}" "${SSH_USER}@${HOST}" "$@"; }
 
-PUBLIC_URL="https://${DOMAIN}/mcp"
+# The connector / OAuth-resource URL is the bare domain root (no redundant /mcp
+# on an already-"mcp." host). Caddy presents the transport at the root and the
+# app still mounts it internally at /mcp.
+PUBLIC_URL="https://${DOMAIN}"
 ISSUER="https://${DOMAIN}"
 REMOTE_ENV_FILE="${APP_DIR}/.env"
 
@@ -102,8 +105,14 @@ REMOTE_ENV_FILE="${APP_DIR}/.env"
 # Render artifacts (pure strings; used by both dry-run and the real deploy)
 # ----------------------------------------------------------------------------
 render_caddyfile() {
+  # Present the MCP transport at the domain root so the connector URL is just
+  # https://<domain> (no redundant /mcp). The app mounts MCP at /mcp, so rewrite
+  # the bare root request onto /mcp/; every other path (OAuth discovery, /oauth,
+  # /healthz, /icon.png, /v1, and the legacy /mcp endpoint) passes through.
   cat <<EOF
 ${DOMAIN} {
+	@root path /
+	rewrite @root /mcp/
 	reverse_proxy 127.0.0.1:${APP_PORT}
 }
 EOF
@@ -338,7 +347,8 @@ check() {
 check "/healthz" "200"
 check "/icon.png" "200"
 check "/.well-known/oauth-protected-resource" "200"
-check "/mcp" "401" "-L"   # unauthenticated MCP must challenge (after the 307 -> /mcp/)
+check "/" "401" "-L"      # root is the MCP endpoint; unauthenticated must challenge
+check "/mcp" "401" "-L"   # legacy path still works (after the 307 -> /mcp/)
 
 echo
 if [ "$ok" -eq 1 ]; then

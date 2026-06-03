@@ -232,7 +232,13 @@ The script is idempotent and safe to re-run. It:
    `/etc/caddy/Caddyfile` reverse-proxying `<domain>` → `127.0.0.1:<port>`,
 5. reloads both services and health-checks the public domain
    (`/healthz`, `/icon.png`, `/.well-known/oauth-protected-resource` → 200;
-   `/mcp` → 401 after the 307 → `/mcp/` redirect).
+   `/` and `/mcp` → 401, the unauthenticated MCP challenge).
+
+Caddy presents the MCP transport at the **domain root** (it rewrites a bare `/`
+onto the app's `/mcp/`), so the connector URL is the clean `https://<domain>`
+rather than `https://<domain>/mcp` — no redundant `/mcp` on an already-`mcp.`
+host. The legacy `/mcp` path keeps working. `LEGAL_MCP_PUBLIC_URL` (the OAuth
+resource/audience) is therefore the bare origin.
 
 **Secrets** come from a local KEY=VALUE file (default
 `~/.config/legal-agent/deploy.env`, chmod 600 — see
@@ -247,7 +253,7 @@ already point at the host (managed locally via the `namecheap-domains` skill);
 the script warns if `<domain>` does not resolve to `--host`, because Caddy
 cannot issue a certificate until it does.
 
-The resulting MCP URL is the stable `https://mcp.arglegal.live/mcp` — it does
+The resulting MCP URL is the stable `https://mcp.arglegal.live` — it does
 **not** rotate (unlike ngrok), so the Claude Cowork connector URL is permanent.
 
 ---
