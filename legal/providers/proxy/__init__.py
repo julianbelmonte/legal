@@ -61,6 +61,20 @@ def detect_backend(proxy_url: str) -> ProxyBackend | None:
     return None
 
 
+def proxy_active() -> bool:
+    """Return whether egress currently goes through a real proxy backend.
+
+    ``True`` only when the proxy is enabled and the selected provider is not
+    ``"none"``. The egress seams use this to decide whether rotating to a fresh
+    exit on failure is meaningful (it is a no-op for direct egress).
+    """
+
+    from legal.settings import get_settings
+
+    settings = get_settings()
+    return bool(settings.proxy_enabled) and settings.proxy_provider != "none"
+
+
 def resolve_proxy(session: str | None = None) -> str | None:
     """Return the proxy URL to use right now, or ``None`` for direct egress.
 
@@ -99,6 +113,7 @@ __all__ = [
     "list_backends",
     "parse_proxy_for_playwright",
     "parse_proxy_url",
+    "proxy_active",
     "resolve_proxy",
     "resolve_proxy_for_playwright",
 ]

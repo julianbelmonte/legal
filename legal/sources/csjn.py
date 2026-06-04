@@ -7,7 +7,12 @@ import re
 from typing import Any
 
 from legal import enrichment
-from legal.browser import BotBrowser
+from legal.browser import (
+    BotBrowser,
+    BrowserExhausted,
+    BrowserRetry,
+    run_with_botbrowser,
+)
 from legal.errors import usage_error
 from legal.models import JsonDict, LegalDocument, LegalError, LegalItem, LegalResponse, PageInfo, Provenance
 from legal.parsing import HtmlNode, parse_html
@@ -31,6 +36,9 @@ TERMS_INDEX = {"todas": 0, "algunas": 1, "frase": 2, "cercanas": 3}
 DEFAULT_RETRIES = 3
 RESULT_POLL_ATTEMPTS = 24
 RESULT_POLL_MS = 500
+# Bound the reCAPTCHA-gated submit navigation so a stalled proxy exit fails fast
+# and a fresh exit is tried, instead of hanging the Playwright-default ~30s.
+SUBMIT_NAV_TIMEOUT_MS = 20000
 SEARCH_NAVIGATION_GLOB = "**/buscar.html"
 FALLOS_FIELDS = ("fecha", "expediente", "tomo", "autos", "materia")
 VER_DOC_RE = re.compile(r"ver\s*\(\s*['\"]?(?P<doc_id>\d+)['\"]?\s*\)")
@@ -92,8 +100,7 @@ def add_download_arguments(parser: argparse.ArgumentParser) -> None:
 
 def handle_fallos(args: argparse.Namespace) -> LegalResponse:
     query = _query_from_args(args)
-    with BotBrowser(hidden=not bool(args.show)) as bb:
-        records, meta = _run_fallos_search(bb.page, args)
+    records, meta = _run_fallos_search(args, hidden=not bool(args.show))
 
     limit = _optional_positive_int(getattr(args, "limit", None))
     response_records = records[:limit] if limit is not None else records
@@ -136,8 +143,7 @@ def handle_fallos(args: argparse.Namespace) -> LegalResponse:
 
 def handle_sumarios(args: argparse.Namespace) -> LegalResponse:
     query = _sumarios_query_from_args(args)
-    with BotBrowser(hidden=not bool(args.show)) as bb:
-        links, meta = _run_sumarios_search(bb.page, args)
+    links, meta = _run_sumarios_search(args, hidden=not bool(args.show))
 
     limit = _optional_positive_int(getattr(args, "limit", None))
     response_links = links[:limit] if limit is not None else links
@@ -369,89 +375,105 @@ def handle_download(args: argparse.Namespace) -> LegalResponse:
     )
 
 
-def _run_fallos_search(page: Any, args: argparse.Namespace, pace: int = 0) -> tuple[list[JsonDict], JsonDict]:
-    """Run a CSJN fallos search using the page's native reCAPTCHA submit path."""
-    last_meta: JsonDict = {}
+def _run_fallos_search(args: argparse.Namespace, *, hidden: bool = True) -> tuple[list[JsonDict], JsonDict]:
+    """Run a CSJN fallos search, rotating the proxy exit on each retry.
+
+    A single attempt drives the page's native reCAPTCHA submit path; soft
+    failures (WAF status, navigation never completing, recaptcha rejected / no
+    results) raise :class:`BrowserRetry` so ``run_with_botbrowser`` relaunches
+    behind a fresh exit. On exhaustion the last failure ``meta`` is returned so
+    the handler can surface a transparent, retryable envelope.
+    """
     retries = _optional_positive_int(getattr(args, "retries", None)) or DEFAULT_RETRIES
-    for attempt in range(retries):
+
+    def _attempt(page: Any, index: int) -> tuple[list[JsonDict], JsonDict]:
         response = page.goto(FALLOS_URL, wait_until="domcontentloaded")
         status = getattr(response, "status", None)
         if status != 200:
-            return [], {"error": f"WAF/HTTP {status}", "url": FALLOS_URL, "attempt": attempt + 1}
+            raise BrowserRetry({"error": f"WAF/HTTP {status}", "url": FALLOS_URL})
 
-        page.wait_for_timeout(3000 + pace)
+        page.wait_for_timeout(3000)
         _warmup_recaptcha(page)
-        _fill_fallos_form(page, args, pace=pace)
-        page.wait_for_timeout(600 + pace)
+        _fill_fallos_form(page, args)
+        page.wait_for_timeout(600)
 
         try:
             _submit_and_wait(page, SEARCH_NAVIGATION_GLOB)
         except Exception:
-            last_meta = {"error": "search navigation did not complete", "attempt": attempt + 1}
-            continue
+            raise BrowserRetry({"error": "search navigation did not complete", "url": FALLOS_URL})
 
         records: list[JsonDict] = []
+        meta: JsonDict = {}
         for _ in range(RESULT_POLL_ATTEMPTS):
             page.wait_for_timeout(RESULT_POLL_MS)
             records = _parse_fallos(page)
-            last_meta = _result_meta(page)
-            if records or last_meta.get("refine"):
+            meta = _result_meta(page)
+            if records or meta.get("refine"):
                 break
 
-        if records or last_meta.get("count") or last_meta.get("refine"):
+        if records or meta.get("count") or meta.get("refine"):
             for record in records:
                 doc_id = _clean_text(record.get("doc_id"))
                 if doc_id:
                     record["doc_id"] = doc_id
                     record["document_url"] = DOC_URL + doc_id
-            last_meta["attempt"] = attempt + 1
-            return records, last_meta
+            meta["attempt"] = index
+            return records, meta
 
-    if last_meta:
-        return [], last_meta
-    return [], {"error": "recaptcha rejected / no results after retries", "url": FALLOS_URL}
+        raise BrowserRetry({**meta, "error": meta.get("error") or "recaptcha rejected / no results", "url": FALLOS_URL})
+
+    try:
+        return run_with_botbrowser(_attempt, retries=retries, hidden=hidden)
+    except BrowserExhausted as exhausted:
+        return [], exhausted.meta
 
 
-def _run_sumarios_search(page: Any, args: argparse.Namespace, pace: int = 0) -> tuple[list[JsonDict], JsonDict]:
-    """Run a CSJN sumarios search using the page's native reCAPTCHA submit path."""
-    last_meta: JsonDict = {}
+def _run_sumarios_search(args: argparse.Namespace, *, hidden: bool = True) -> tuple[list[JsonDict], JsonDict]:
+    """Run a CSJN sumarios search, rotating the proxy exit on each retry.
+
+    Same rotation contract as :func:`_run_fallos_search`: each retry runs behind
+    a fresh proxy exit so a stalled/dead exit is abandoned rather than reused.
+    """
     retries = _optional_positive_int(getattr(args, "retries", None)) or DEFAULT_RETRIES
-    for attempt in range(retries):
+
+    def _attempt(page: Any, index: int) -> tuple[list[JsonDict], JsonDict]:
         response = page.goto(SUMARIOS_URL, wait_until="domcontentloaded")
         status = getattr(response, "status", None)
         if status != 200:
-            return [], {"error": f"WAF/HTTP {status}", "url": SUMARIOS_URL, "attempt": attempt + 1}
+            raise BrowserRetry({"error": f"WAF/HTTP {status}", "url": SUMARIOS_URL})
 
-        page.wait_for_timeout(3000 + pace)
+        page.wait_for_timeout(3000)
         _warmup_recaptcha(page)
-        _fill_sumarios_form(page, args, pace=pace)
-        page.wait_for_timeout(600 + pace)
+        _fill_sumarios_form(page, args)
+        page.wait_for_timeout(600)
 
         try:
             _submit_and_wait(page, SEARCH_NAVIGATION_GLOB)
         except Exception:
-            last_meta = {"error": "search navigation did not complete", "attempt": attempt + 1}
-            continue
+            raise BrowserRetry({"error": "search navigation did not complete", "url": SUMARIOS_URL})
 
         # Results and the count badge settle asynchronously after navigation;
         # poll until rows render (or the refine notice appears) before reading
         # the count, otherwise a stale loading total leaks into `total`.
         links: list[JsonDict] = []
-        last_meta = {}
+        meta: JsonDict = {}
         for _ in range(RESULT_POLL_ATTEMPTS):
             page.wait_for_timeout(RESULT_POLL_MS)
             links = _parse_sumario_links(page)
-            last_meta = _result_meta(page, kind="sumarios")
-            if links or last_meta.get("refine"):
+            meta = _result_meta(page, kind="sumarios")
+            if links or meta.get("refine"):
                 break
         page_text = _page_body_text(page, max_chars=4000)
-        last_meta.update({"attempt": attempt + 1, "page_text": page_text})
-        if links or last_meta.get("count") or last_meta.get("refine"):
-            return links, last_meta
+        meta.update({"attempt": index, "page_text": page_text})
+        if links or meta.get("count") or meta.get("refine"):
+            return links, meta
 
-    if last_meta:
-        return [], last_meta
-    return [], {"error": "recaptcha rejected / no results after retries", "url": SUMARIOS_URL}
+        raise BrowserRetry({**meta, "error": meta.get("error") or "recaptcha rejected / no results", "url": SUMARIOS_URL})
+
+    try:
+        return run_with_botbrowser(_attempt, retries=retries, hidden=hidden)
+    except BrowserExhausted as exhausted:
+        return [], exhausted.meta
 
 
 def _warmup_recaptcha(page: Any) -> None:
@@ -682,8 +704,13 @@ def _parse_sumario_links(page: Any) -> list[JsonDict]:
 
 
 def _submit_and_wait(page: Any, target_url_glob: str) -> None:
-    """Click Buscar and wait for the delayed reCAPTCHA-gated navigation."""
-    with page.expect_navigation(url=target_url_glob, wait_until="domcontentloaded", timeout=30000):
+    """Click Buscar and wait for the delayed reCAPTCHA-gated navigation.
+
+    Bounded tighter than the Playwright default so a stalled exit is abandoned
+    quickly (``run_with_botbrowser`` then retries behind a fresh exit) instead of
+    hanging ~30s per attempt and blowing past the agent-side timeout.
+    """
+    with page.expect_navigation(url=target_url_glob, wait_until="domcontentloaded", timeout=SUBMIT_NAV_TIMEOUT_MS):
         _click_buscar(page)
 
 

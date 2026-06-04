@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from time import sleep
 from typing import Any, Mapping
 
@@ -12,7 +12,10 @@ from legal.errors import LegalCliError, network_error, not_found, parse_error, s
 from legal.models import Provenance
 
 
-DEFAULT_TIMEOUT = 30.0
+# A flaky residential/mobile proxy exit typically stalls during the TLS/connect
+# handshake; a short connect bound fails such an exit fast (so we can rotate to a
+# fresh one) while keeping a generous read budget for slow-but-alive origins.
+DEFAULT_TIMEOUT = httpx.Timeout(30.0, connect=8.0)
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -32,7 +35,7 @@ BODY_SNIPPET_LIMIT = 500
 
 @dataclass(frozen=True)
 class HttpSettings:
-    timeout: float | httpx.Timeout = DEFAULT_TIMEOUT
+    timeout: float | httpx.Timeout = field(default_factory=lambda: DEFAULT_TIMEOUT)
     user_agent: str = USER_AGENT
     retries: int = DEFAULT_RETRIES
     retry_backoff: float = DEFAULT_RETRY_BACKOFF
@@ -93,14 +96,21 @@ class LegalHttpClient:
         if client is not None and transport is not None:
             raise ValueError("pass either client or transport, not both")
         self.settings = settings or HttpSettings()
-        self._client = client or build_client(
-            self.settings,
-            transport=transport,
-            base_url=base_url,
-            headers=headers,
-            proxy=proxy,
-        )
+        self._build_kwargs: dict[str, Any] = {
+            "transport": transport,
+            "base_url": base_url,
+            "headers": headers,
+            "proxy": proxy,
+        }
+        self._client = client or build_client(self.settings, **self._build_kwargs)
         self._owns_client = client is None
+        # We can rotate to a fresh proxy exit between attempts only when this
+        # client owns its httpx client and the proxy was auto-resolved (no
+        # injected transport/client and no explicitly pinned proxy). A pinned
+        # proxy or an offline MockTransport is left exactly as the caller set it.
+        self._rotatable = (
+            self._owns_client and transport is None and proxy is None and _rotation_enabled()
+        )
 
     def __enter__(self) -> "LegalHttpClient":
         return self
@@ -121,7 +131,13 @@ class LegalHttpClient:
             self._client.close()
 
     def request(self, method: str, url: str | httpx.URL, **kwargs: Any) -> httpx.Response:
-        """Run a request, retry transient failures, and raise LegalCliError."""
+        """Run a request, retry transient failures, and raise LegalCliError.
+
+        When the proxy is active, a transient failure (timeout/network error or
+        a 5xx/transient status) rotates to a **fresh proxy exit** before the next
+        attempt — a dead or stalled exit is abandoned rather than retried, which
+        is the only way to recover from a poisoned residential/mobile exit.
+        """
         attempts = max(0, self.settings.retries) + 1
         last_request_error: httpx.RequestError | None = None
 
@@ -130,6 +146,7 @@ class LegalHttpClient:
                 response = self._client.request(method, url, **kwargs)
                 if _is_retryable_status(response.status_code) and attempt < attempts - 1:
                     response.close()
+                    self._rotate_exit()
                     self._sleep_before_retry(attempt)
                     continue
                 response.raise_for_status()
@@ -139,6 +156,7 @@ class LegalHttpClient:
             except httpx.RequestError as exc:
                 last_request_error = exc
                 if isinstance(exc, RETRYABLE_EXCEPTIONS) and attempt < attempts - 1:
+                    self._rotate_exit()
                     self._sleep_before_retry(attempt)
                     continue
                 raise _legal_error_from_request(exc) from exc
@@ -146,6 +164,26 @@ class LegalHttpClient:
         if last_request_error is not None:
             raise _legal_error_from_request(last_request_error) from last_request_error
         raise RuntimeError("request loop exited without response or error")
+
+    def _rotate_exit(self) -> None:
+        """Rebuild the underlying client behind a fresh proxy exit.
+
+        No-op unless this client owns an auto-resolved proxy connection. Cookies
+        collected so far are carried over so a multi-request flow is not reset by
+        the rotation; only the network exit changes.
+        """
+        if not self._rotatable:
+            return
+        cookies = self._client.cookies
+        try:
+            self._client.close()
+        except Exception:
+            pass
+        self._client = build_client(self.settings, **self._build_kwargs)
+        try:
+            self._client.cookies.update(cookies)
+        except Exception:
+            pass
 
     def fetch_json(self, method: str, url: str | httpx.URL, **kwargs: Any) -> Any:
         response = self.request(method, url, **kwargs)
@@ -186,6 +224,21 @@ class LegalHttpClient:
         if self.settings.retry_backoff <= 0:
             return
         sleep(self.settings.retry_backoff * (2**attempt))
+
+
+def _rotation_enabled() -> bool:
+    """Whether a fresh proxy exit should be tried between retries.
+
+    True only when a real proxy backend is active and rotation is not disabled
+    via settings; for direct egress there is nothing to rotate.
+    """
+    try:
+        from legal.providers.proxy import proxy_active
+        from legal.settings import get_settings
+
+        return proxy_active() and bool(get_settings().proxy_rotate_on_failure)
+    except Exception:
+        return False
 
 
 def _is_retryable_status(status_code: int) -> bool:

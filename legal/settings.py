@@ -27,6 +27,11 @@ class Settings(BaseSettings):
     proxy_enabled: bool = False
     proxy_provider: str = "none"  # "none" | "floxy"
     proxy_country: str = "us"
+    # When egress goes through a proxy, individual residential/mobile exits are
+    # flaky: a dead exit hangs to the timeout wall and retrying the *same* exit
+    # cannot recover. With rotation on, the HTTP client and browser launcher
+    # abandon a failed exit and retry behind a fresh proxy session.
+    proxy_rotate_on_failure: bool = True
     captcha_provider: str = "capsolver"
     botbrowser_profile: str | None = None  # pin a specific .enc by name
 
