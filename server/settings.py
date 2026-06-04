@@ -57,6 +57,11 @@ class McpSettings(BaseSettings):
     oauth_redirect_uris: str = ""
     # Lifetime, in seconds, of issued OAuth access tokens.
     oauth_token_ttl_seconds: int = 3600
+    # Lifetime, in seconds, of issued OAuth refresh tokens. The client exchanges
+    # a refresh token for a fresh access token before this elapses; each refresh
+    # also re-issues the refresh token (sliding window), so an actively used
+    # connector never needs to re-authenticate. Defaults to 90 days.
+    oauth_refresh_ttl_seconds: int = 7776000
 
     # --- Document text cache -------------------------------------------------
     # Time-to-live, in seconds, for extracted document text cache records.
@@ -65,7 +70,10 @@ class McpSettings(BaseSettings):
     max_page_size: int = 20000
 
     @field_validator(
-        "cache_ttl_seconds", "max_page_size", "oauth_token_ttl_seconds"
+        "cache_ttl_seconds",
+        "max_page_size",
+        "oauth_token_ttl_seconds",
+        "oauth_refresh_ttl_seconds",
     )
     @classmethod
     def _positive(cls, value: int) -> int:

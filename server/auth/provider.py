@@ -42,6 +42,7 @@ from server.auth.models import (
     DEFAULT_SCOPE,
     AccessToken,
     AuthorizationCode,
+    RefreshToken,
     TokenClaims,
 )
 from server.settings import McpSettings, get_mcp_settings
@@ -50,6 +51,13 @@ from server.settings import McpSettings, get_mcp_settings
 _JWT_ALG = "HS256"
 # Lifetime, in seconds, of an unredeemed authorization code.
 _AUTH_CODE_TTL_SECONDS = 600
+# ``token_use`` claim values distinguishing the two issued JWT kinds. A refresh
+# token must never be accepted as a bearer access token (and vice versa), so the
+# value is asserted on each verification path.
+_TOKEN_USE_ACCESS = "access"
+_TOKEN_USE_REFRESH = "refresh"
+# Default refresh-token lifetime when settings do not specify one (90 days).
+_DEFAULT_REFRESH_TTL_SECONDS = 7776000
 
 
 def _now() -> int:
@@ -93,6 +101,7 @@ class SingleUserOAuthProvider:
     issuer: str
     resource: str
     token_ttl_seconds: int
+    refresh_ttl_seconds: int = _DEFAULT_REFRESH_TTL_SECONDS
     redirect_uris: frozenset[str] = field(default_factory=frozenset)
     _codes: dict[str, AuthorizationCode] = field(default_factory=dict, repr=False)
 
@@ -111,6 +120,9 @@ class SingleUserOAuthProvider:
             issuer=settings.issuer(),
             resource=settings.resource(),
             token_ttl_seconds=settings.oauth_token_ttl_seconds,
+            refresh_ttl_seconds=getattr(
+                settings, "oauth_refresh_ttl_seconds", _DEFAULT_REFRESH_TTL_SECONDS
+            ),
             redirect_uris=frozenset(settings.allowed_redirect_uris()),
         )
 
@@ -264,6 +276,7 @@ class SingleUserOAuthProvider:
             client_id=client_id,
             issued_at=now,
             jti=secrets.token_urlsafe(12),
+            token_use=_TOKEN_USE_ACCESS,
         )
         token = jwt.encode(claims.to_payload(), self.signing_key, algorithm=_JWT_ALG)
         return AccessToken(
@@ -273,13 +286,93 @@ class SingleUserOAuthProvider:
             scope=scope,
         )
 
-    def decode_token(self, token: str) -> TokenClaims:
-        """Validate a bearer token and return its claims.
+    def issue_refresh_token(
+        self,
+        *,
+        email: str,
+        client_id: str | None = None,
+        scope: str = DEFAULT_SCOPE,
+        now: int | None = None,
+    ) -> RefreshToken:
+        """Issue a long-lived, stateless signed-JWT refresh token.
+
+        The refresh token is a JWT signed with the same key as access tokens but
+        carrying ``token_use=refresh`` so it cannot be presented as a bearer
+        (``decode_token`` rejects it). It is stateless, so it survives app
+        restarts/redeploys as long as the signing key is stable.
+        """
+        if not self.is_allowed_user(email):
+            raise OAuthProviderError("access_denied", "user not allowed")
+        if not self.signing_key:
+            raise OAuthProviderError(
+                "server_error", "OAuth signing key is not configured"
+            )
+        issued_at = now if now is not None else _now()
+        claims = TokenClaims.build(
+            sub=email.strip(),
+            aud=self.resource,
+            iss=self.issuer,
+            ttl_seconds=self.refresh_ttl_seconds,
+            scope=scope,
+            client_id=client_id,
+            issued_at=issued_at,
+            jti=secrets.token_urlsafe(12),
+            token_use=_TOKEN_USE_REFRESH,
+        )
+        token = jwt.encode(claims.to_payload(), self.signing_key, algorithm=_JWT_ALG)
+        return RefreshToken(
+            token=SecretStr(token),
+            client_id=client_id or "",
+            user_email=email.strip(),
+            scope=scope,
+            issued_at=issued_at,
+            expires_at=claims.exp,
+        )
+
+    def redeem_refresh_token(
+        self,
+        *,
+        refresh_token: str,
+        client_id: str | None = None,
+        now: int | None = None,
+    ) -> tuple[AccessToken, RefreshToken]:
+        """Exchange a valid refresh token for a fresh access + refresh token pair.
+
+        Validates the refresh JWT (signature, audience, issuer, expiry, and the
+        ``token_use=refresh`` marker), re-checks the bound subject against the
+        allowlist, and — when the refresh token carries a ``client_id`` and the
+        request supplies one — that they match. On success a new access token and
+        a freshly minted refresh token are returned (sliding expiration), so an
+        actively used connector renews indefinitely without re-login.
+        """
+        now = now if now is not None else _now()
+        claims = self._decode_jwt(refresh_token, expected_use=_TOKEN_USE_REFRESH)
+        if not self.is_allowed_user(claims.sub):
+            raise OAuthProviderError("invalid_grant", "user not allowed")
+        token_client = claims.client_id
+        if client_id and token_client and client_id != token_client:
+            raise OAuthProviderError("invalid_grant", "client_id mismatch")
+        effective_client = client_id or token_client
+        access = self.issue_access_token(
+            email=claims.sub, client_id=effective_client, scope=claims.scope, now=now
+        )
+        refresh = self.issue_refresh_token(
+            email=claims.sub, client_id=effective_client, scope=claims.scope, now=now
+        )
+        return access, refresh
+
+    def _decode_jwt(self, token: str, *, expected_use: str) -> TokenClaims:
+        """Decode + validate a signed token JWT and assert its ``token_use``.
 
         Verifies signature, audience (the MCP resource), issuer, and expiry, then
-        re-checks the subject against the allowlist. Raises
-        :class:`OAuthProviderError` (``invalid_token``) on any failure.
+        enforces that the token's ``token_use`` matches ``expected_use`` so an
+        access token cannot be redeemed as a refresh token and a refresh token
+        cannot be presented as a bearer. The ``invalid_token`` error code is used
+        for the bearer path and ``invalid_grant`` for the refresh path.
         """
+        error_code = (
+            "invalid_token" if expected_use == _TOKEN_USE_ACCESS else "invalid_grant"
+        )
         try:
             payload = jwt.decode(
                 token,
@@ -290,9 +383,26 @@ class SingleUserOAuthProvider:
                 options={"require": ["exp", "iss", "aud", "sub"]},
             )
         except jwt.PyJWTError as exc:
-            raise OAuthProviderError("invalid_token", str(exc)) from exc
+            raise OAuthProviderError(error_code, str(exc)) from exc
 
-        claims = TokenClaims.model_validate(payload)
+        # Tokens minted before ``token_use`` existed are treated as access tokens
+        # (backward compatible); refresh tokens always carry the explicit marker.
+        token_use = payload.get("token_use", _TOKEN_USE_ACCESS)
+        if token_use != expected_use:
+            raise OAuthProviderError(
+                error_code, f"expected a {expected_use} token, got {token_use}"
+            )
+        return TokenClaims.model_validate(payload)
+
+    def decode_token(self, token: str) -> TokenClaims:
+        """Validate a bearer access token and return its claims.
+
+        Verifies signature, audience (the MCP resource), issuer, and expiry,
+        rejects refresh tokens presented as bearers, then re-checks the subject
+        against the allowlist. Raises :class:`OAuthProviderError`
+        (``invalid_token``) on any failure.
+        """
+        claims = self._decode_jwt(token, expected_use=_TOKEN_USE_ACCESS)
         if not self.is_allowed_user(claims.sub):
             raise OAuthProviderError(
                 "invalid_token", "token subject is not an allowed user"

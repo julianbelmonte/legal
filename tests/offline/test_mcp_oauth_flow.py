@@ -276,6 +276,77 @@ def test_oauth_token_exchange_correct_verifier_succeeds(
     assert claims.sub == EMAIL
 
 
+def _exchange_code_for_tokens(client: TestClient) -> dict:
+    """Run authorize + code exchange and return the token endpoint JSON body."""
+    verifier = secrets.token_urlsafe(48)
+    challenge = compute_s256_challenge(verifier)
+    auth = _authorize(
+        client,
+        email=EMAIL,
+        secret=SECRET,
+        redirect_uri=REDIRECT_URI,
+        code_challenge=challenge,
+    )
+    code = _extract_code(auth)
+    resp = client.post(
+        TOKEN_PATH,
+        data={
+            "grant_type": "authorization_code",
+            "code": code,
+            "client_id": CLIENT_ID,
+            "redirect_uri": REDIRECT_URI,
+            "code_verifier": verifier,
+        },
+    )
+    assert resp.status_code == 200
+    return resp.json()
+
+
+def test_oauth_code_exchange_returns_refresh_token(client: TestClient) -> None:
+    """The authorization_code grant returns a refresh token alongside access."""
+    body = _exchange_code_for_tokens(client)
+    assert body["refresh_token"]
+    # The refresh token must NOT be usable as a bearer access token.
+    assert _provider().verify_token_sync(body["refresh_token"]) is None
+    # The access token must validate.
+    assert _provider().decode_token(body["access_token"]).sub == EMAIL
+
+
+def test_oauth_refresh_grant_issues_new_tokens(client: TestClient) -> None:
+    """A refresh_token grant mints a fresh, valid access + refresh pair."""
+    first = _exchange_code_for_tokens(client)
+    resp = client.post(
+        TOKEN_PATH,
+        data={
+            "grant_type": "refresh_token",
+            "refresh_token": first["refresh_token"],
+            "client_id": CLIENT_ID,
+        },
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["token_type"] == "Bearer"
+    # New access token validates as a bearer; a new (rotated) refresh is returned.
+    assert _provider().decode_token(body["access_token"]).sub == EMAIL
+    assert body["refresh_token"]
+    assert _provider().verify_token_sync(body["refresh_token"]) is None
+
+
+def test_oauth_refresh_grant_rejects_access_token(client: TestClient) -> None:
+    """An access token presented to the refresh grant is rejected (token_use)."""
+    first = _exchange_code_for_tokens(client)
+    resp = client.post(
+        TOKEN_PATH,
+        data={
+            "grant_type": "refresh_token",
+            "refresh_token": first["access_token"],  # wrong token kind
+            "client_id": CLIENT_ID,
+        },
+    )
+    assert resp.status_code == 400
+    assert resp.json()["error"] == "invalid_grant"
+
+
 # --- token expiry ------------------------------------------------------------
 
 

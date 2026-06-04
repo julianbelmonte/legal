@@ -30,6 +30,7 @@ from __future__ import annotations
 import html
 import secrets
 from collections.abc import Callable
+from typing import Any
 from urllib.parse import urlencode
 
 from starlette.requests import Request
@@ -225,39 +226,64 @@ def build_oauth_routes(
             redirect_uri, record.code.get_secret_value(), state
         )
 
-    async def token(request: Request) -> Response:
-        """Exchange an authorization code (+ PKCE verifier) for an access token."""
-        form = await request.form()
-        grant_type = str(form.get("grant_type", ""))
-        if grant_type != "authorization_code":
-            return _oauth_error(
-                "unsupported_grant_type",
-                "only authorization_code is supported",
-                400,
-            )
-        code = str(form.get("code", ""))
-        client_id = str(form.get("client_id", ""))
-        redirect_uri = str(form.get("redirect_uri", ""))
-        code_verifier = str(form.get("code_verifier", "")) or None
-        try:
-            access = _provider().exchange_code(
-                code=code,
-                client_id=client_id,
-                redirect_uri=redirect_uri,
-                code_verifier=code_verifier,
-            )
-        except OAuthProviderError as exc:
-            status = 401 if exc.error in {"invalid_client", "access_denied"} else 400
-            return _oauth_error(exc.error, exc.description, status)
-
-        ttl = _settings().oauth_token_ttl_seconds
+    def _token_response(access: Any, refresh: Any) -> JSONResponse:
+        """Build the RFC 6749 token response carrying access + refresh tokens."""
         return JSONResponse(
             {
                 "access_token": access.token.get_secret_value(),
                 "token_type": "Bearer",
-                "expires_in": ttl,
+                "expires_in": _settings().oauth_token_ttl_seconds,
+                "refresh_token": refresh.token.get_secret_value(),
                 "scope": access.scope,
             }
+        )
+
+    async def token(request: Request) -> Response:
+        """Issue tokens for the ``authorization_code`` or ``refresh_token`` grant.
+
+        ``authorization_code`` exchanges a PKCE-bound code for an access +
+        refresh token pair. ``refresh_token`` exchanges a still-valid refresh
+        token for a fresh pair (sliding expiration), so an actively used
+        connector renews indefinitely without re-authenticating.
+        """
+        form = await request.form()
+        grant_type = str(form.get("grant_type", ""))
+        client_id = str(form.get("client_id", "")) or None
+        provider = _provider()
+
+        if grant_type == "authorization_code":
+            try:
+                access = provider.exchange_code(
+                    code=str(form.get("code", "")),
+                    client_id=client_id or "",
+                    redirect_uri=str(form.get("redirect_uri", "")),
+                    code_verifier=str(form.get("code_verifier", "")) or None,
+                )
+                refresh = provider.issue_refresh_token(
+                    email=access.claims.sub,
+                    client_id=client_id,
+                    scope=access.scope,
+                )
+            except OAuthProviderError as exc:
+                status = 401 if exc.error in {"invalid_client", "access_denied"} else 400
+                return _oauth_error(exc.error, exc.description, status)
+            return _token_response(access, refresh)
+
+        if grant_type == "refresh_token":
+            try:
+                access, refresh = provider.redeem_refresh_token(
+                    refresh_token=str(form.get("refresh_token", "")),
+                    client_id=client_id,
+                )
+            except OAuthProviderError as exc:
+                status = 401 if exc.error in {"invalid_client", "access_denied"} else 400
+                return _oauth_error(exc.error, exc.description, status)
+            return _token_response(access, refresh)
+
+        return _oauth_error(
+            "unsupported_grant_type",
+            "only authorization_code and refresh_token are supported",
+            400,
         )
 
     return [

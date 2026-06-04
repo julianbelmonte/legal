@@ -47,6 +47,7 @@ APP_DIR="${APP_DIR:-/opt/legal-agent}"
 SERVICE_USER="${SERVICE_USER:-legal}"
 APP_PORT="${APP_PORT:-8080}"
 ALLOWED_EMAIL="${ALLOWED_EMAIL:-yoli@arglegal.live}"
+ACCESS_TTL_SECONDS="${ACCESS_TTL_SECONDS:-86400}"
 DEPLOY_ENV="${DEPLOY_ENV:-$HOME/.config/legal-agent/deploy.env}"
 STATE_FILE="${LEGAL_DEPLOY_STATE_FILE:-$HOME/.config/legal-agent/deploy-state.json}"
 DRY_RUN=0
@@ -231,6 +232,11 @@ trap 'rm -f "$tmp_env"' EXIT
   echo "LEGAL_MCP_ALLOWED_EMAILS=${ALLOWED_EMAIL}"
   echo "LEGAL_MCP_OAUTH_SIGNING_KEY=${LEGAL_MCP_OAUTH_SIGNING_KEY}"
   echo "LEGAL_MCP_OAUTH_LOGIN_SECRET=${LEGAL_MCP_OAUTH_LOGIN_SECRET}"
+  # Access tokens are short-lived; the client silently renews them via the
+  # refresh token (grant_type=refresh_token). 24h access is a safety net so a
+  # client that does not refresh still does not drop hourly. Refresh tokens last
+  # 90 days (sliding) — see LEGAL_MCP_OAUTH_REFRESH_TTL_SECONDS default.
+  echo "LEGAL_MCP_OAUTH_TOKEN_TTL_SECONDS=${ACCESS_TTL_SECONDS}"
   echo "LEGAL_API_KEY=${LEGAL_API_KEY}"
   echo "LEGAL_PROXY_ENABLED=true"
   echo "LEGAL_PROXY_PROVIDER=anyip"
