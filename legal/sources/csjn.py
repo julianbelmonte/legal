@@ -33,12 +33,21 @@ PDF_URL = BASE + "/sjconsulta/documentos/verDocumentoById.html?idDocumento="
 SITEKEY = "6Lc9hfArAAAAANCZ9hMlXTx8j7hKz52W2tgwovXk"
 TERMS_INDEX = {"todas": 0, "algunas": 1, "frase": 2, "cercanas": 3}
 
-DEFAULT_RETRIES = 3
+# Browser search is probabilistic (proxy exit health + reCAPTCHA Enterprise
+# score), and each retry runs behind a fresh exit, so a generous budget is what
+# converts a flaky per-attempt success rate into a reliable overall result.
+DEFAULT_RETRIES = 10
+# Non-essential assets dropped to speed the DOM load through a slow proxy; the
+# search form + reCAPTCHA scripts/xhr still load.
+_BLOCKED_RESOURCES = ("image", "media", "font")
 RESULT_POLL_ATTEMPTS = 24
 RESULT_POLL_MS = 500
-# Bound the reCAPTCHA-gated submit navigation so a stalled proxy exit fails fast
-# and a fresh exit is tried, instead of hanging the Playwright-default ~30s.
-SUBMIT_NAV_TIMEOUT_MS = 20000
+# Empirically, a successful reCAPTCHA-gated submit navigates well under ~35s,
+# while a *low-score* submit never navigates at all (a 90s cap still timed out).
+# So this bound separates the two: it clears genuine submits and escapes a silent
+# reject quickly to rotate to a fresh exit. Patience does not convert a silent
+# reject into a success, so a tight bound is correct here.
+SUBMIT_NAV_TIMEOUT_MS = 40000
 SEARCH_NAVIGATION_GLOB = "**/buscar.html"
 FALLOS_FIELDS = ("fecha", "expediente", "tomo", "autos", "materia")
 VER_DOC_RE = re.compile(r"ver\s*\(\s*['\"]?(?P<doc_id>\d+)['\"]?\s*\)")
@@ -420,10 +429,26 @@ def _run_fallos_search(args: argparse.Namespace, *, hidden: bool = True) -> tupl
             meta["attempt"] = index
             return records, meta
 
-        raise BrowserRetry({**meta, "error": meta.get("error") or "recaptcha rejected / no results", "url": FALLOS_URL})
+        # No rows and no count badge: the search never executed (reCAPTCHA/WAF
+        # block) rather than a genuine empty result, which always renders a
+        # "Total: 0" count. Capture the page text so the logs *show* what CSJN
+        # returned, letting us confirm the count-badge tell instead of guessing.
+        raise BrowserRetry(
+            {
+                **meta,
+                "error": meta.get("error") or "recaptcha rejected / no results (no count badge)",
+                "url": FALLOS_URL,
+                "page_text": _page_body_text(page, max_chars=2000),
+            }
+        )
 
     try:
-        return run_with_botbrowser(_attempt, retries=retries, hidden=hidden)
+        return run_with_botbrowser(
+            _attempt,
+            retries=retries,
+            hidden=hidden,
+            launcher=lambda h: BotBrowser(hidden=h, block_resource_types=_BLOCKED_RESOURCES),
+        )
     except BrowserExhausted as exhausted:
         return [], exhausted.meta
 
@@ -471,7 +496,12 @@ def _run_sumarios_search(args: argparse.Namespace, *, hidden: bool = True) -> tu
         raise BrowserRetry({**meta, "error": meta.get("error") or "recaptcha rejected / no results", "url": SUMARIOS_URL})
 
     try:
-        return run_with_botbrowser(_attempt, retries=retries, hidden=hidden)
+        return run_with_botbrowser(
+            _attempt,
+            retries=retries,
+            hidden=hidden,
+            launcher=lambda h: BotBrowser(hidden=h, block_resource_types=_BLOCKED_RESOURCES),
+        )
     except BrowserExhausted as exhausted:
         return [], exhausted.meta
 

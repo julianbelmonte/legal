@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import subprocess
 import tempfile
@@ -19,16 +20,19 @@ from legal import config
 from legal.errors import source_unavailable
 
 
+log = logging.getLogger("legal.browser")
+
 _BINDINGS_CLEANUP = (
     "delete window.__playwright__binding__; delete window.__pwInitScripts;"
 )
 
-# Fail-fast page defaults: a flaky proxy exit stalls navigation, and waiting the
-# Playwright default (30s) per step multiplies into agent-side timeouts. Bound
-# navigation/actions tighter so a dead exit is abandoned quickly and a fresh one
-# can be tried by ``run_with_botbrowser``.
-DEFAULT_NAV_TIMEOUT_MS = 15000
-DEFAULT_ACTION_TIMEOUT_MS = 15000
+# Page defaults calibrated to a real full-DOM load through a residential/mobile
+# proxy: healthy exits load the target in ~14-20s, dead exits hit ERR_TIMED_OUT
+# around ~35s. The nav budget must clear the healthy case (a tighter bound just
+# kills slow-but-working exits); rotation — not an aggressive timeout — is what
+# delivers reliability by abandoning the genuinely dead exits.
+DEFAULT_NAV_TIMEOUT_MS = 40000
+DEFAULT_ACTION_TIMEOUT_MS = 30000
 
 # Browser-launch / page errors that mean "this exit or attempt failed; rotating
 # to a fresh proxy exit may recover".
@@ -74,8 +78,13 @@ def _start_xvfb() -> tuple[subprocess.Popen[bytes], str]:
 class BotBrowser:
     """Minimal self-contained BotBrowser-via-Playwright launcher."""
 
-    def __init__(self, hidden: bool = False):
+    def __init__(self, hidden: bool = False, block_resource_types: tuple[str, ...] = ()):
         self.hidden = hidden
+        # Resource types to abort at the network layer (e.g. image/media/font).
+        # Through a slow residential/mobile proxy a full DOM load of heavy assets
+        # is what trips the nav timeout; dropping non-essential assets cuts load
+        # time sharply. Scripts/xhr/stylesheets are kept so reCAPTCHA still runs.
+        self.block_resource_types = tuple(block_resource_types)
         self._xvfb: subprocess.Popen[bytes] | None = None
         self._pw: Any | None = None
         self.ctx: Any | None = None
@@ -134,6 +143,16 @@ class BotBrowser:
             self.ctx = self._pw.chromium.launch_persistent_context(**launch_kwargs)
             self.page = self.ctx.pages[0] if self.ctx.pages else self.ctx.new_page()
             self.page.add_init_script(_BINDINGS_CLEANUP)
+            if self.block_resource_types:
+                blocked = set(self.block_resource_types)
+                self.page.route(
+                    "**/*",
+                    lambda route: (
+                        route.abort()
+                        if route.request.resource_type in blocked
+                        else route.continue_()
+                    ),
+                )
             # Fail fast on a stalled exit instead of hanging the Playwright
             # default; callers can still pass an explicit per-call timeout.
             self.page.set_default_navigation_timeout(DEFAULT_NAV_TIMEOUT_MS)
@@ -197,17 +216,41 @@ def run_with_botbrowser(
     tries = max(1, retries)
     last_meta: dict[str, Any] = {}
     for index in range(tries):
+        started = time.monotonic()
+        log.info("botbrowser attempt %d/%d (fresh proxy exit)", index + 1, tries)
         try:
             with make(hidden) as bb:
-                return attempt(bb.page, index + 1)
+                result = attempt(bb.page, index + 1)
+                log.info(
+                    "botbrowser attempt %d/%d succeeded in %.1fs",
+                    index + 1,
+                    tries,
+                    time.monotonic() - started,
+                )
+                return result
         except BrowserRetry as retry:
             last_meta = {**retry.meta, "attempt": index + 1, "exits_tried": index + 1}
+            log.warning(
+                "botbrowser attempt %d/%d soft-failed in %.1fs: %s",
+                index + 1,
+                tries,
+                time.monotonic() - started,
+                last_meta.get("error"),
+            )
         except RETRYABLE_BROWSER_EXCEPTIONS as exc:
             last_meta = {
                 "error": f"{type(exc).__name__}: {str(exc)[:200]}",
                 "attempt": index + 1,
                 "exits_tried": index + 1,
             }
+            log.warning(
+                "botbrowser attempt %d/%d errored in %.1fs: %s",
+                index + 1,
+                tries,
+                time.monotonic() - started,
+                last_meta.get("error"),
+            )
+    log.error("botbrowser exhausted after %d exit(s): %s", tries, last_meta.get("error"))
     raise BrowserExhausted(last_meta)
 
 

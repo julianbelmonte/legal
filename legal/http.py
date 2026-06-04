@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from time import sleep
 from typing import Any, Mapping
@@ -10,6 +11,9 @@ import httpx
 
 from legal.errors import LegalCliError, network_error, not_found, parse_error, source_unavailable
 from legal.models import Provenance
+
+
+log = logging.getLogger("legal.http")
 
 
 # A flaky residential/mobile proxy exit typically stalls during the TLS/connect
@@ -174,6 +178,7 @@ class LegalHttpClient:
         """
         if not self._rotatable:
             return
+        log.warning("http: rotating to a fresh proxy exit after a transient failure")
         cookies = self._client.cookies
         try:
             self._client.close()

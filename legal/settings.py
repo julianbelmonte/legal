@@ -25,8 +25,11 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="LEGAL_", extra="ignore")
 
     proxy_enabled: bool = False
-    proxy_provider: str = "none"  # "none" | "floxy"
+    proxy_provider: str = "none"  # "none" | "floxy" | "anyip"
     proxy_country: str = "us"
+    # AnyIP exit pool: "mobile" (CGNAT, heavily WAF/reCAPTCHA-flagged),
+    # "residential" (real-ISP IPs, best reCAPTCHA reputation), or "datacenter".
+    anyip_type: str = "mobile"
     # When egress goes through a proxy, individual residential/mobile exits are
     # flaky: a dead exit hangs to the timeout wall and retrying the *same* exit
     # cannot recover. With rotation on, the HTTP client and browser launcher

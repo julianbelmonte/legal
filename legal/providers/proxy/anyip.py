@@ -25,13 +25,15 @@ class AnyIPBackend(ProxyBackend):
 
     def build_proxy_url(self, country_code: str, session: str | None = None) -> str:
         from legal import config
+        from legal.settings import get_settings
 
         user = config.anyip_user()
         password = config.anyip_pass()
         session_id = _NONALNUM.sub("", session or generate_session_id())
+        exit_type = get_settings().anyip_type or "mobile"
         flags = ",".join(
             [
-                "type_mobile",
+                f"type_{exit_type}",
                 f"country_{country_code.upper()}",
                 f"session_{session_id}",
             ]
