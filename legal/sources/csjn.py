@@ -48,6 +48,8 @@ RESULT_POLL_MS = 500
 # reject quickly to rotate to a fresh exit. Patience does not convert a silent
 # reject into a success, so a tight bound is correct here.
 SUBMIT_NAV_TIMEOUT_MS = 40000
+# How long to wait for enterprise.js + jQuery to load before injecting the token.
+_RECAPTCHA_READY_TIMEOUT_MS = 25000
 SEARCH_NAVIGATION_GLOB = "**/buscar.html"
 FALLOS_FIELDS = ("fecha", "expediente", "tomo", "autos", "materia")
 VER_DOC_RE = re.compile(r"ver\s*\(\s*['\"]?(?P<doc_id>\d+)['\"]?\s*\)")
@@ -402,7 +404,7 @@ def _run_fallos_search(args: argparse.Namespace, *, hidden: bool = True) -> tupl
             raise BrowserRetry({"error": f"WAF/HTTP {status}", "url": FALLOS_URL})
 
         page.wait_for_timeout(3000)
-        _warmup_recaptcha(page)
+        _prepare_recaptcha(page, FALLOS_URL)
         _fill_fallos_form(page, args)
         page.wait_for_timeout(600)
 
@@ -468,7 +470,7 @@ def _run_sumarios_search(args: argparse.Namespace, *, hidden: bool = True) -> tu
             raise BrowserRetry({"error": f"WAF/HTTP {status}", "url": SUMARIOS_URL})
 
         page.wait_for_timeout(3000)
-        _warmup_recaptcha(page)
+        _prepare_recaptcha(page, SUMARIOS_URL)
         _fill_sumarios_form(page, args)
         page.wait_for_timeout(600)
 
@@ -518,6 +520,67 @@ def _warmup_recaptcha(page: Any) -> None:
     page.mouse.move(380, 280)
     page.mouse.move(560, 400)
     page.wait_for_timeout(400)
+
+
+# Override the page's reCAPTCHA execute() so the Buscar submit uses a token we
+# supply instead of one scored against our (flagged) egress IP. grecaptcha is
+# read at click time, so reassigning execute/ready on the live globals is enough.
+_INJECT_TOKEN_JS = """(tok) => {
+    const patch = (g) => {
+        if (!g) return;
+        g.execute = function () { return Promise.resolve(tok); };
+        if (g.ready) g.ready = function (cb) { try { cb && cb(); } catch (e) {} };
+    };
+    if (window.grecaptcha) { patch(window.grecaptcha); patch(window.grecaptcha.enterprise); }
+}"""
+
+
+def _solve_csjn_token(page_url: str) -> str:
+    """Fetch a high-reputation reCAPTCHA token for CSJN from the captcha provider.
+
+    CSJN's Enterprise verification rejects low-scored tokens, so request a
+    high-score one (a 0.9 token navigated/accepted where a 0.7 token did not).
+    """
+    from legal.providers.captcha import get_backend
+
+    return get_backend().solve_recaptcha_v3(page_url, SITEKEY, "submit", min_score=0.9)
+
+
+def _prepare_recaptcha(page: Any, page_url: str) -> None:
+    """Prepare the reCAPTCHA token per the configured CSJN captcha mode.
+
+    "capsolver": solve a high-score token off-IP and inject it so the page's
+    Buscar submit carries it (score independent of our egress). "native": run the
+    page's own Enterprise scoring (free, but low-scored behind flagged proxies).
+    """
+    from legal.providers.captcha.base import CaptchaError
+    from legal.settings import get_settings
+
+    if get_settings().csjn_captcha == "capsolver":
+        # buscar() needs jQuery ($) and reads grecaptcha.enterprise.execute at
+        # click time; if we inject before enterprise.js has loaded the patch
+        # no-ops and the page falls back to its own low-scored token. Wait for
+        # both to be live before injecting.
+        try:
+            page.wait_for_function(
+                "() => typeof window.$ !== 'undefined'"
+                " && !!(window.grecaptcha && window.grecaptcha.enterprise"
+                " && window.grecaptcha.enterprise.execute)",
+                timeout=_RECAPTCHA_READY_TIMEOUT_MS,
+            )
+        except Exception:
+            raise BrowserRetry({"error": "grecaptcha/jquery not ready", "url": page_url})
+        try:
+            token = _solve_csjn_token(page_url)
+        except CaptchaError as exc:
+            # A transient solve failure should rotate/retry, not crash the call.
+            raise BrowserRetry({"error": f"captcha solve failed: {str(exc)[:160]}", "url": page_url})
+        page.evaluate(_INJECT_TOKEN_JS, token)
+        page.mouse.move(380, 280)
+        page.mouse.move(560, 400)
+        page.wait_for_timeout(200)
+    else:
+        _warmup_recaptcha(page)
 
 
 def _fill_sumarios_form(page: Any, args: argparse.Namespace, *, pace: int = 0) -> None:

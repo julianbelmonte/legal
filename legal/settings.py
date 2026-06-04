@@ -36,6 +36,11 @@ class Settings(BaseSettings):
     # abandon a failed exit and retry behind a fresh proxy session.
     proxy_rotate_on_failure: bool = True
     captcha_provider: str = "capsolver"
+    # CSJN reCAPTCHA Enterprise handling: "native" runs the page's own scoring
+    # (the only config with demonstrated end-to-end success so far), or
+    # "capsolver" injects a provider token (wired and occasionally accepted, but
+    # not yet reliably better than native — kept as an opt-in for further tuning).
+    csjn_captcha: str = "native"
     botbrowser_profile: str | None = None  # pin a specific .enc by name
 
 
