@@ -54,9 +54,12 @@ tier needs no env:
 | Env var | Default | Meaning |
 | --- | --- | --- |
 | `LEGAL_PROXY_ENABLED` | `false` | Enable proxy egress. With it disabled, egress is direct (today's behavior). |
-| `LEGAL_PROXY_PROVIDER` | `none` | Proxy backend: `none` or `floxy`. |
+| `LEGAL_PROXY_PROVIDER` | `none` | Proxy backend: `none`, `floxy`, or `anyip`. |
 | `LEGAL_PROXY_COUNTRY` | `us` | Exit country for the proxy provider. |
+| `LEGAL_PROXY_ROTATE_ON_FAILURE` | `true` | On a transient failure, rebuild behind a **fresh proxy exit** before retrying (HTTP client + browser launcher). A dead/stalled residential/mobile exit is abandoned, not retried. |
+| `LEGAL_ANYIP_TYPE` | `mobile` | AnyIP exit pool: `mobile`, `residential`, or `datacenter`. |
 | `LEGAL_CAPTCHA_PROVIDER` | `capsolver` | Captcha backend selection. |
+| `LEGAL_CSJN_CAPTCHA` | `native` | CSJN reCAPTCHA mode: `native` (page scoring) or `capsolver` (inject a provider token; wired but not yet reliably better than native). |
 | `LEGAL_BOTBROWSER_PROFILE` | unset | Pin a specific `.enc` profile by name/stem; otherwise the launcher rotates over all profiles. |
 
 API auth keys (see `api/settings.py`, prefix `LEGAL_API_`):
@@ -301,8 +304,16 @@ or `download`, PJN jurisprudence downloads, Sentencias SCBA `pdf`, and PTN
 - Browser and captcha sources are slower and probabilistic. Use `--retries`
   where available and treat retryable JSON errors as source-state evidence.
 - Capsolver credits are used by PJN Expedientes, PTN, and Sentencias SCBA.
-  CSJN uses BotBrowser/native Enterprise scoring and should not spend credits.
+  CSJN defaults to BotBrowser/native Enterprise scoring (no Capsolver); set
+  `LEGAL_CSJN_CAPTCHA=capsolver` to inject a provider token instead.
+- CSJN is a hostile target: its gateway returns intermittent WAF 502s and its
+  reCAPTCHA Enterprise scores automated browsers low, so per-attempt success is
+  variable on **every** egress (mobile/residential/VPN/direct). Reliability comes
+  from proxy-exit rotation + a generous `--retries` budget; on exhaustion it
+  returns a clean **retryable** error (the agent re-calls) rather than hanging.
 - Proxy egress is optional and off by default; when enabled it is applied at
-  both egress seams (HTTP client and browser launcher).
+  both egress seams (HTTP client and browser launcher). On a transient failure
+  each seam rotates to a fresh exit (`LEGAL_PROXY_ROTATE_ON_FAILURE`) so a dead
+  residential/mobile exit is abandoned, not retried.
 - The pipeline is standalone — do not add imports from `drone` or depend on
   repo-only runtime services from other projects.
