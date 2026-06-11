@@ -48,12 +48,12 @@ def _read_pdf(data: bytes | str) -> tuple[bytes, Path | None]:
 
 def _extract_with_pdftotext(pdftotext: str, path: Path) -> str:
     result = subprocess.run(
-        [pdftotext, "-layout", str(path), "-"],
+        [pdftotext, "-enc", "UTF-8", "-layout", str(path), "-"],
         check=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     )
-    return result.stdout.decode("utf-8", errors="ignore")
+    return result.stdout.decode("utf-8", errors="replace")
 
 
 def _extract_with_pypdf(pdf_bytes: bytes) -> str:
