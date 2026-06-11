@@ -49,6 +49,7 @@ SYSTEM_PACKAGES = (
     "pkg-config",
     "xvfb",
     "fonts-liberation",
+    "poppler-utils",  # provides the `pdftotext` binary backing legal.pdf.extract_text
 )
 
 #: Headless-browser / Playwright shared-library deps. Ubuntu 24.04 (noble)

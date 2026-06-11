@@ -315,5 +315,9 @@ or `download`, PJN jurisprudence downloads, Sentencias SCBA `pdf`, and PTN
   both egress seams (HTTP client and browser launcher). On a transient failure
   each seam rotates to a fresh exit (`LEGAL_PROXY_ROTATE_ON_FAILURE`) so a dead
   residential/mobile exit is abandoned, not retried.
+- PDF text extraction prefers `pdftotext` (from `poppler-utils`, installed by the
+  deploy bootstrap) for high-fidelity output; `pypdf` is a degraded fallback that
+  now emits a `warnings` entry in the envelope when used, so a host missing
+  poppler is visible rather than silently lossy.
 - The pipeline is standalone — do not add imports from `drone` or depend on
   repo-only runtime services from other projects.
