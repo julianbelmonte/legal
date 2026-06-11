@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import inspect
+import logging
 import shutil
 import subprocess
 from pathlib import Path
@@ -10,6 +11,16 @@ from pathlib import Path
 import pytest
 
 import legal.pdf as pdf
+
+# A minimal valid PDF (no fonts/glyphs needed for engine-selection tests).
+_MINIMAL_PDF = (
+    b"%PDF-1.1\n"
+    b"1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n"
+    b"2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n"
+    b"3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 200]>>endobj\n"
+    b"trailer<</Root 1 0 R>>\n"
+    b"%%EOF\n"
+)
 
 # The accent classes we must preserve through extraction.
 ACCENTS = ["ñ", "ó", "í", "á"]
@@ -77,3 +88,42 @@ def test_extract_with_pdftotext_pins_utf8_and_drops_ignore() -> None:
     assert 'errors="ignore"' not in source, source
     assert "errors='ignore'" not in source, source
     assert "replace" in source, source
+
+
+def test_extract_text_detailed_reports_pdftotext_engine(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Mock the engine binary and the extraction call so the test is independent
+    # of any installed PDF tooling and of the fixture's glyph content.
+    monkeypatch.setattr(pdf.shutil, "which", lambda name: "/usr/bin/pdftotext")
+    monkeypatch.setattr(
+        pdf, "_extract_with_pdftotext", lambda exe, path: "extracted via pdftotext"
+    )
+
+    result = pdf.extract_text_detailed(_MINIMAL_PDF)
+
+    assert result.engine == "pdftotext"
+    assert result.degraded is False
+    assert result.text == "extracted via pdftotext"
+
+
+def test_extract_text_detailed_reports_degraded_pypdf_fallback(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    monkeypatch.setattr(pdf.shutil, "which", lambda name: None)
+    monkeypatch.setattr(pdf, "_extract_with_pypdf", lambda pdf_bytes: "via pypdf")
+
+    with caplog.at_level(logging.WARNING, logger="legal.pdf"):
+        result = pdf.extract_text_detailed(_MINIMAL_PDF)
+
+    assert result.engine == "pypdf"
+    assert result.degraded is True
+    assert result.text == "via pypdf"
+    assert pdf.DEGRADED_FALLBACK_WARNING in caplog.text
+
+
+def test_extract_text_matches_detailed_text(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(pdf.shutil, "which", lambda name: None)
+    monkeypatch.setattr(pdf, "_extract_with_pypdf", lambda pdf_bytes: "parity text")
+
+    assert pdf.extract_text(_MINIMAL_PDF) == pdf.extract_text_detailed(_MINIMAL_PDF).text
