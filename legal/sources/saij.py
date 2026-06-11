@@ -275,10 +275,12 @@ def handle_download(args: argparse.Namespace) -> LegalResponse:
         pdf_bytes = response.content
 
     want_text = bool(getattr(args, "want_text", False))
+    warnings: list[str] = []
     pdf_meta = enrichment.finalize_document(
         pdf_bytes,
         want_text=want_text,
         save_path=_optional_text(getattr(args, "save_pdf", None)),
+        warnings=warnings,
     )
     document = LegalDocument(
         id=base_document.id,
@@ -302,6 +304,7 @@ def handle_download(args: argparse.Namespace) -> LegalResponse:
         request={"guid": guid},
         document=document,
         provenance=document.provenance,
+        warnings=warnings,
     )
 
 

@@ -270,10 +270,12 @@ def handle_pdf(args: argparse.Namespace) -> LegalResponse:
 
     pdf_data = _required_pdf_data(payload, response=response, code=code)
     pdf_bytes = _decode_pdf_data(pdf_data, response=response, code=code)
+    warnings: list[str] = []
     enrichment_fields = enrichment.finalize_document(
         pdf_bytes,
         want_text=want_text,
         save_path=save_path,
+        warnings=warnings,
     )
     text_value = enrichment_fields.get("text")
     text = text_value if isinstance(text_value, str) and text_value.strip() else None
@@ -328,6 +330,7 @@ def handle_pdf(args: argparse.Namespace) -> LegalResponse:
         request=_compact({"code": code, "text": True if want_text else None, "save_pdf": save_path}),
         document=document,
         provenance=document.provenance,
+        warnings=warnings,
     )
 
 

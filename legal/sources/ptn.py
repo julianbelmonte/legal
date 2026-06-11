@@ -240,10 +240,12 @@ def handle_download(args: argparse.Namespace) -> LegalResponse:
         pdf_response = client.request("GET", file_url, headers=_pdf_headers())
         pdf_bytes = pdf_response.content
 
+    warnings: list[str] = []
     enrichment_fields = enrichment.finalize_document(
         pdf_bytes,
         want_text=want_text,
         save_path=save_path,
+        warnings=warnings,
     )
     text_value = enrichment_fields.get("text")
     text = text_value if isinstance(text_value, str) and text_value.strip() else None
@@ -308,6 +310,7 @@ def handle_download(args: argparse.Namespace) -> LegalResponse:
         request=request,
         document=document,
         provenance=document.provenance,
+        warnings=warnings,
     )
 
 

@@ -16,7 +16,7 @@ from legal.browser import (
 from legal.errors import usage_error
 from legal.models import JsonDict, LegalDocument, LegalError, LegalItem, LegalResponse, PageInfo, Provenance
 from legal.parsing import HtmlNode, parse_html
-from legal.pdf import extract_text
+from legal.pdf import DEGRADED_FALLBACK_WARNING, extract_text_detailed
 from legal.registry import SOURCE_BY_ID
 from legal.sources import SourceAdapter, register_adapter
 
@@ -212,7 +212,10 @@ def handle_documento(args: argparse.Namespace) -> LegalResponse:
     pdf_text = None
     if _has_pdf_bytes(pdf):
         try:
-            pdf_text = _clean_text(extract_text(pdf["body"]))
+            extraction = extract_text_detailed(pdf["body"])
+            pdf_text = _clean_text(extraction.text)
+            if extraction.degraded and DEGRADED_FALLBACK_WARNING not in warnings:
+                warnings.append(DEGRADED_FALLBACK_WARNING)
         except Exception as exc:
             warnings.append(f"pdf text extraction failed: {type(exc).__name__}: {exc}")
     else:
@@ -322,10 +325,12 @@ def handle_download(args: argparse.Namespace) -> LegalResponse:
             ),
         )
 
+    warnings: list[str] = []
     enrichment_fields = enrichment.finalize_document(
         pdf["body"],
         want_text=want_text,
         save_path=save_path,
+        warnings=warnings,
     )
     text_value = enrichment_fields.get("text")
     text = text_value if isinstance(text_value, str) and text_value.strip() else None
@@ -383,6 +388,7 @@ def handle_download(args: argparse.Namespace) -> LegalResponse:
         request=_compact({"id": doc_id, "text": True if want_text else None, "save_pdf": save_path}),
         document=document,
         provenance=document.provenance,
+        warnings=warnings,
     )
 
 

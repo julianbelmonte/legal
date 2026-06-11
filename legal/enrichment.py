@@ -6,7 +6,7 @@ import argparse
 from pathlib import Path
 from typing import Any
 
-from legal.pdf import extract_text
+from legal.pdf import DEGRADED_FALLBACK_WARNING, extract_text_detailed
 
 
 def add_text_arguments(parser: argparse.ArgumentParser) -> None:
@@ -21,8 +21,20 @@ def add_text_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--save-pdf", dest="save_pdf", help="optional path for writing the PDF bytes")
 
 
-def finalize_document(pdf_bytes: bytes, *, want_text: bool, save_path: str | None) -> dict[str, Any]:
-    """Save PDF bytes and optionally attach extracted text metadata."""
+def finalize_document(
+    pdf_bytes: bytes,
+    *,
+    want_text: bool,
+    save_path: str | None,
+    warnings: list[str] | None = None,
+) -> dict[str, Any]:
+    """Save PDF bytes and optionally attach extracted text metadata.
+
+    When ``want_text`` triggers a degraded ``pypdf`` extraction fallback and a
+    ``warnings`` list is supplied, the canonical
+    :data:`legal.pdf.DEGRADED_FALLBACK_WARNING` is appended (once) so callers
+    can surface it in the normalized response envelope.
+    """
 
     saved: str | None = None
     if save_path:
@@ -36,7 +48,10 @@ def finalize_document(pdf_bytes: bytes, *, want_text: bool, save_path: str | Non
         "saved": saved,
     }
     if want_text:
-        result["text"] = extract_text(pdf_bytes)
+        extraction = extract_text_detailed(pdf_bytes)
+        result["text"] = extraction.text
+        if extraction.degraded and warnings is not None and DEGRADED_FALLBACK_WARNING not in warnings:
+            warnings.append(DEGRADED_FALLBACK_WARNING)
     return result
 
 

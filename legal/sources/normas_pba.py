@@ -298,10 +298,12 @@ def handle_download(args: argparse.Namespace) -> LegalResponse:
         response = client.request("GET", pdf_url)
         pdf_bytes = response.content
 
+    warnings: list[str] = []
     pdf_meta = enrichment.finalize_document(
         pdf_bytes,
         want_text=bool(getattr(args, "want_text", False)),
         save_path=_optional_text(getattr(args, "save_pdf", None)),
+        warnings=warnings,
     )
     document = LegalDocument(
         id=route.item_id,
@@ -332,6 +334,7 @@ def handle_download(args: argparse.Namespace) -> LegalResponse:
         request=_compact({"path": route.path, "target": target}),
         document=document,
         provenance=document.provenance,
+        warnings=warnings,
     )
 
 
