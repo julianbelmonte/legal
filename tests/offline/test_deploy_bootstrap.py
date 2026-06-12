@@ -14,6 +14,7 @@ from deploy.bootstrap import (
     DEFAULT_APP_PORT,
     VENDOR_BOOTSTRAP_REL,
     render_bootstrap_script,
+    render_caddyfile,
     render_env_file,
     render_systemd_units,
 )
@@ -22,7 +23,8 @@ from deploy.bootstrap import (
 def test_render_contains_required_substrings():
     script = render_bootstrap_script(app_dir="/opt/legal", service_user="legal")
     assert "uv" in script
-    assert "ngrok" in script
+    assert "caddy" in script  # Caddy fronts the app on the public domain
+    assert "ngrok" not in script  # ngrok removed; Caddy/domain is the path
     assert "legal/scripts/bootstrap.py" in script
     assert VENDOR_BOOTSTRAP_REL in script
 
@@ -31,11 +33,20 @@ def test_render_has_idempotence_markers():
     script = render_bootstrap_script(app_dir="/opt/legal", service_user="legal")
     # Guards that make the script safe to re-run.
     assert "command -v uv" in script
-    assert "command -v ngrok" in script
+    assert "command -v caddy" in script
     assert "id -u" in script
     assert "mkdir -p" in script
     assert "systemctl enable --now" in script
     assert "set -euo pipefail" in script
+
+
+def test_render_configures_caddy_for_domain():
+    script = render_bootstrap_script(
+        app_dir="/opt/legal", service_user="legal", domain="mcp.arglegal.live"
+    )
+    assert "/etc/caddy/Caddyfile" in script
+    assert "mcp.arglegal.live" in script
+    assert "enable --now caddy" in script
 
 
 def test_render_references_app_dir_and_user():
@@ -59,20 +70,26 @@ def test_no_real_secret_leaks_into_script():
         assert needle not in script
 
 
-def test_systemd_units_bind_app_and_ngrok():
+def test_systemd_units_only_the_app():
     units = render_systemd_units(
         app_dir="/opt/legal",
         service_user="legal",
         app_port=DEFAULT_APP_PORT,
         app_env_file="/opt/legal/.env",
     )
-    names = list(units)
-    assert any(n.endswith(".service") for n in names)
-    app_text = next(t for n, t in units.items() if "api" in n)
+    # Caddy fronts the app via a Caddyfile (not a rendered systemd unit here), so
+    # the only rendered unit is the app service.
+    assert list(units) == ["legal-api.service"]
+    app_text = units["legal-api.service"]
     assert "uvicorn api.main:app" in app_text
     assert f"--port {DEFAULT_APP_PORT}" in app_text
-    ngrok_text = next(t for n, t in units.items() if "ngrok" in n)
-    assert "ngrok http" in ngrok_text
+
+
+def test_caddyfile_serves_mcp_at_domain_root():
+    caddyfile = render_caddyfile("mcp.arglegal.live", DEFAULT_APP_PORT)
+    assert "mcp.arglegal.live {" in caddyfile
+    assert "rewrite @root /mcp/" in caddyfile
+    assert f"reverse_proxy 127.0.0.1:{DEFAULT_APP_PORT}" in caddyfile
 
 
 def test_env_file_writer_is_restrictive_and_quotes_values():

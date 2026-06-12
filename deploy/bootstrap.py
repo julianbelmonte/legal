@@ -1,10 +1,12 @@
 """Render idempotent VPS bootstrap scripts for the legal API + MCP server.
 
 This module produces shell text (strings) that prepare a fresh Ubuntu-like
-Cloudzy VPS to run the combined ASGI app (``api.main:app``) and an ngrok
-tunnel. Nothing here executes anything or touches real secrets: it renders
-scripts, systemd unit text, and an env-file writer that the orchestrator
-(step 30) runs remotely after syncing the repo into ``app_dir``.
+Cloudzy VPS to run the combined ASGI app (``api.main:app``) behind **Caddy**,
+which fronts a stable domain with automatic HTTPS and presents the MCP
+transport at the domain root. Nothing here executes anything or touches real
+secrets: it renders scripts, systemd unit text, the Caddyfile, and an env-file
+writer that the orchestrator runs remotely after syncing the repo into
+``app_dir``.
 
 Design goals:
 
@@ -34,9 +36,11 @@ DEFAULT_APP_PORT = 8080
 #: Path (relative to ``app_dir``) of the existing browser-vendoring helper.
 VENDOR_BOOTSTRAP_REL = "legal/scripts/bootstrap.py"
 
-#: Default systemd unit names.
+#: Default systemd unit name for the combined ASGI app.
 APP_SERVICE_NAME = "legal-api"
-NGROK_SERVICE_NAME = "legal-ngrok"
+
+#: Default public domain Caddy fronts (overridable per deploy).
+DEFAULT_DOMAIN = "mcp.arglegal.live"
 
 #: Core system packages always installed (builds + tooling). These names are
 #: stable across recent Ubuntu releases.
@@ -119,6 +123,27 @@ def render_env_file(
     return "\n".join(lines) + "\n"
 
 
+def render_caddyfile(domain: str, app_port: int = DEFAULT_APP_PORT) -> str:
+    """Render the Caddyfile fronting ``domain`` -> the app on ``app_port``.
+
+    Caddy obtains/renews a Let's Encrypt certificate for ``domain`` and presents
+    the MCP transport at the domain ROOT: it rewrites the bare ``/`` request onto
+    ``/mcp/`` (the app mounts MCP at ``/mcp``), so the connector URL is just
+    ``https://<domain>``. Every other path (OAuth discovery, ``/oauth``,
+    ``/healthz``, ``/icon.png``, ``/v1``, and the legacy ``/mcp`` endpoint) is
+    reverse-proxied through unchanged.
+    """
+    if not domain.strip():
+        raise ValueError("domain must be a non-empty hostname")
+    return (
+        f"{domain} {{\n"
+        f"\t@root path /\n"
+        f"\trewrite @root /mcp/\n"
+        f"\treverse_proxy 127.0.0.1:{app_port}\n"
+        f"}}\n"
+    )
+
+
 def render_systemd_units(
     *,
     app_dir: str,
@@ -126,15 +151,14 @@ def render_systemd_units(
     app_port: int = DEFAULT_APP_PORT,
     app_env_file: str,
     app_service_name: str = APP_SERVICE_NAME,
-    ngrok_service_name: str = NGROK_SERVICE_NAME,
 ) -> dict[str, str]:
-    """Return ``{unit_filename: unit_text}`` for the app and ngrok services.
+    """Return ``{unit_filename: unit_text}`` for the app service.
 
     The app unit runs ``uv run uvicorn api.main:app`` bound to ``app_port`` from
-    ``app_dir`` as ``service_user``, loading the restricted env file. The ngrok
-    unit runs ``ngrok http <app_port>`` and depends on the app unit. Both are
-    idempotent to install (overwriting the file is safe) and enabled with
-    ``systemctl enable --now`` by the bootstrap script.
+    ``app_dir`` as ``service_user``, loading the restricted env file. Caddy
+    (installed/configured by the bootstrap script, not a rendered unit here)
+    fronts it on the public domain. The unit is idempotent to install
+    (overwriting the file is safe) and enabled with ``systemctl enable --now``.
     """
     app_unit = f"""[Unit]
 Description=Legal API + MCP server (combined ASGI app)
@@ -154,36 +178,16 @@ RestartSec=3
 WantedBy=multi-user.target
 """
 
-    ngrok_unit = f"""[Unit]
-Description=ngrok tunnel for the legal API
-After=network-online.target {app_service_name}.service
-Wants=network-online.target
-Requires={app_service_name}.service
-
-[Service]
-Type=simple
-User={service_user}
-ExecStart=/usr/local/bin/ngrok http {app_port} --log=stdout
-Restart=on-failure
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-"""
-
-    return {
-        f"{app_service_name}.service": app_unit,
-        f"{ngrok_service_name}.service": ngrok_unit,
-    }
+    return {f"{app_service_name}.service": app_unit}
 
 
 def render_bootstrap_script(
     *,
     app_dir: str,
     service_user: str,
+    domain: str = DEFAULT_DOMAIN,
     app_port: int = DEFAULT_APP_PORT,
     app_service_name: str = APP_SERVICE_NAME,
-    ngrok_service_name: str = NGROK_SERVICE_NAME,
     app_env_file: str | None = None,
 ) -> str:
     """Render the idempotent bootstrap shell script for a fresh VPS.
@@ -193,15 +197,17 @@ def render_bootstrap_script(
 
     1. installs system packages (apt-get) for builds + headless browser deps,
     2. installs ``uv`` (skipped if already present) and Python via uv,
-    3. installs ``ngrok`` from its apt repository (skipped if present),
+    3. installs ``caddy`` from its apt repository (skipped if present),
     4. creates ``service_user`` and ``app_dir`` (idempotently),
-    5. runs ``uv sync`` in ``app_dir`` (repo is synced there by step 30),
+    5. runs ``uv sync`` in ``app_dir`` (repo is synced there beforehand),
     6. runs the existing ``legal/scripts/bootstrap.py`` (via uv) to vendor
        BotBrowser profiles,
-    7. installs + enables systemd units for the app and ngrok.
+    7. installs + enables the app systemd unit and writes/enables the Caddyfile
+       fronting ``domain`` with automatic HTTPS.
 
     :param app_dir: Absolute remote deployment directory holding the repo.
-    :param service_user: Unprivileged user that owns/runs the services.
+    :param service_user: Unprivileged user that owns/runs the service.
+    :param domain: Public domain Caddy fronts (reverse-proxy to the app).
     :param app_port: Port the ASGI app binds to.
     :param app_env_file: Remote env file path loaded by the app unit. Defaults
         to ``<app_dir>/.env`` (chmod 600, owned by ``service_user``).
@@ -218,8 +224,8 @@ def render_bootstrap_script(
         app_port=app_port,
         app_env_file=env_file,
         app_service_name=app_service_name,
-        ngrok_service_name=ngrok_service_name,
     )
+    caddyfile = render_caddyfile(domain, app_port)
 
     q_app_dir = shlex.quote(app_dir)
     q_user = shlex.quote(service_user)
@@ -279,16 +285,17 @@ if ! command -v uv >/dev/null 2>&1; then
 fi
 command -v uv
 
-echo "[bootstrap] installing ngrok"
-if ! command -v ngrok >/dev/null 2>&1; then
-  curl -sSL https://ngrok-agent.s3.amazonaws.com/ngrok.asc \\
-    | tee /etc/apt/trusted.gpg.d/ngrok.asc >/dev/null
-  echo "deb https://ngrok-agent.s3.amazonaws.com buster main" \\
-    > /etc/apt/sources.list.d/ngrok.list
+echo "[bootstrap] installing caddy"
+if ! command -v caddy >/dev/null 2>&1; then
+  apt-get install -y --no-install-recommends debian-keyring debian-archive-keyring apt-transport-https
+  curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' \\
+    | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+  curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' \\
+    > /etc/apt/sources.list.d/caddy-stable.list
   apt-get update -y
-  apt-get install -y ngrok
+  apt-get install -y caddy
 fi
-command -v ngrok
+command -v caddy
 
 echo "[bootstrap] creating service user $SERVICE_USER"
 if ! id -u "$SERVICE_USER" >/dev/null 2>&1; then
@@ -327,6 +334,14 @@ echo "[bootstrap] installing systemd units"
 
 systemctl daemon-reload
 {enable_blocks}
+
+echo "[bootstrap] writing Caddyfile for {domain}"
+mkdir -p /etc/caddy
+cat > /etc/caddy/Caddyfile <<'LEGAL_CADDY_EOF'
+{caddyfile}LEGAL_CADDY_EOF
+systemctl enable --now caddy
+# Reload Caddy config without dropping the listener (falls back to restart).
+caddy reload --config /etc/caddy/Caddyfile 2>/dev/null || systemctl restart caddy
 
 echo "[bootstrap] done"
 """

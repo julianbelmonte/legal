@@ -345,6 +345,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         emit_json(envelope)
         return _exit_code(envelope)
 
+    # Token resolution: --token wins, then the CLOUDZY_API_TOKEN env var (handled
+    # by CloudzyClient), then the gitignored deploy.env file. Resolving from
+    # deploy.env here keeps cloudzy_cli consistent with the deploy orchestrator,
+    # so a token stored only in deploy.env (the project's rule — never committed)
+    # is usable by both. Never printed.
+    if getattr(args, "token", None) is None:
+        try:
+            from deploy.secrets import load_deploy_secrets
+
+            args.token = load_deploy_secrets().cloudzy_api_token
+        except Exception:  # secret resolution is best-effort; client errors clearly
+            pass
+
     try:
         envelope = args.func(args)
     except Exception as exc:  # normalized error envelope; one JSON doc out

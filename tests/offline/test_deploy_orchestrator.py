@@ -123,3 +123,93 @@ def test_help_exits_zero(capsys):
     with pytest.raises(SystemExit) as exc:
         deploy.main(["--help"])
     assert exc.value.code == 0
+
+
+# -- domain / Caddy plan + DNS automation -----------------------------------
+
+
+def test_deploy_plan_is_domain_caddy_not_ngrok(capsys):
+    code, doc = _run(capsys, ["deploy", "--dry-run", "--json"])
+    assert code == 0
+    plan = doc["plan"]
+    assert plan["domain"] == deploy.DEFAULT_DOMAIN
+    assert plan["public_url"] == f"https://{deploy.DEFAULT_DOMAIN}"
+    # Caddy fronts the app; the only rendered systemd unit is the app service.
+    assert plan["systemd_units"] == ["legal-api.service"]
+    blob = " ".join(plan["steps"]) + " ".join(plan["remote_command_summary"])
+    assert "caddy" in blob.lower()
+    assert "ngrok" not in blob.lower()
+    assert plan["dns_repoint"] is False  # reuse deploy: no DNS repoint
+
+
+def test_fresh_plan_includes_namecheap_dns_steps(capsys):
+    code, doc = _run(capsys, ["deploy", "--fresh", "--dry-run", "--json"])
+    assert code == 0
+    plan = doc["plan"]
+    assert plan["fresh"] is True
+    assert plan["dns_repoint"] is True
+    steps = " ".join(plan["steps"]).lower()
+    assert "namecheap" in steps and "a record" in steps and "dns" in steps
+
+
+def test_fresh_no_dns_skips_repoint(capsys):
+    code, doc = _run(capsys, ["deploy", "--fresh", "--no-dns", "--dry-run", "--json"])
+    assert code == 0
+    assert doc["plan"]["dns_repoint"] is False
+
+
+def test_custom_domain_flows_into_plan(capsys):
+    code, doc = _run(
+        capsys, ["deploy", "--dry-run", "--json", "--domain", "api.example.org"]
+    )
+    assert code == 0
+    assert doc["plan"]["domain"] == "api.example.org"
+    assert doc["plan"]["public_url"] == "https://api.example.org"
+
+
+class _FakeProc:
+    def __init__(self, returncode, stdout="", stderr=""):
+        self.returncode = returncode
+        self.stdout = stdout
+        self.stderr = stderr
+
+
+def test_repoint_dns_success(monkeypatch):
+    calls: list[list[str]] = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        if "dns-set-ip" in cmd:
+            return _FakeProc(0, '{"ok": true, "records": [{"host": "mcp"}]}')
+        return _FakeProc(0, "")
+
+    monkeypatch.setattr(deploy.subprocess, "run", fake_run)
+    res = deploy._repoint_dns("mcp.arglegal.live", "1.2.3.4")
+    assert res["ok"] is True
+    assert res["host"] == "mcp"
+    assert res["ip"] == "1.2.3.4"
+    # The dns-set-ip invocation carried the resolved host label.
+    set_ip = next(c for c in calls if "dns-set-ip" in c)
+    assert "mcp.arglegal.live" in set_ip and "1.2.3.4" in set_ip
+    assert "--host" in set_ip and "mcp" in set_ip
+
+
+def test_repoint_dns_failure_raises(monkeypatch):
+    def fake_run(cmd, **kwargs):
+        if "dns-set-ip" in cmd:
+            return _FakeProc(1, '{"ok": false}', "boom")
+        return _FakeProc(0, "")
+
+    monkeypatch.setattr(deploy.subprocess, "run", fake_run)
+    with pytest.raises(deploy.DeployError):
+        deploy._repoint_dns("mcp.arglegal.live", "1.2.3.4")
+
+
+def test_wait_for_dns_returns_on_match(monkeypatch):
+    monkeypatch.setattr(deploy, "_dns_resolves_to", lambda d, ip: True)
+    assert deploy._wait_for_dns("x.example", "1.2.3.4", timeout=1.0, interval=0.01) is True
+
+
+def test_wait_for_dns_times_out_is_nonfatal(monkeypatch):
+    monkeypatch.setattr(deploy, "_dns_resolves_to", lambda d, ip: False)
+    assert deploy._wait_for_dns("x.example", "1.2.3.4", timeout=0.05, interval=0.01) is False

@@ -496,8 +496,8 @@ def run_smoke(
     }
     if not all_ok:
         envelope["diagnostics_to_collect"] = [
-            "service logs (systemd journal for the api/mcp unit)",
-            "ngrok status (deploy.ngrok.discover_public_url / agent API)",
+            "service logs (journalctl -u legal-api -u caddy)",
+            "Caddy/TLS status (cert issuance for the public domain)",
             "OAuth metadata (.well-known/oauth-authorization-server)",
             "MCP challenge response (401 WWW-Authenticate on /mcp)",
         ]

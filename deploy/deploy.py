@@ -5,22 +5,28 @@ deploy building blocks into a single deploy flow:
 
 - :mod:`deploy.cloudzy` (``CloudzyClient``) to provision / reuse / poll /
   destroy a Cloudzy VPS,
-- :mod:`deploy.secrets` (``load_deploy_secrets`` / ``redact_secret``) to
-  resolve the Cloudzy token + ngrok authtoken without ever printing raw values,
+- :mod:`deploy.secrets` (``load_deploy_secrets``) to resolve the Cloudzy token
+  and runtime secrets without ever printing raw values,
 - :mod:`deploy.bootstrap` (``render_bootstrap_script`` /
-  ``render_systemd_units`` / ``render_env_file``) to render the remote setup.
+  ``render_systemd_units`` / ``render_caddyfile`` / ``render_env_file``) to
+  render the remote setup,
+- :mod:`deploy.domain` for the bare-domain public URL / OAuth env and the
+  Namecheap ``--host`` label used to repoint DNS at a fresh VPS.
 
-The deploy flow: provision-or-reuse a VPS, wait for SSH (paramiko), sync the
-repo into ``app_dir``, write the remote env file (chmod 600) from the secret
-loader, run the bootstrap script, ``uv sync``, start the systemd services,
-verify health, and record deployment state locally under
-``~/.config/legal-agent/deploy-state.json``. ``destroy`` tears down a recorded
-instance.
+The deploy flow: provision-or-reuse a VPS, (on ``--fresh``) repoint the
+Namecheap DNS A record at the new IP and wait for it to resolve, wait for SSH
+(paramiko), sync the repo into ``app_dir``, write the remote env file (chmod
+600) with the bare-domain public URL/issuer, run the bootstrap script (installs
+Caddy and writes the Caddyfile), ``uv sync``, start the app service, verify
+local + public health, and record deployment state locally under
+``~/.config/legal-agent/deploy-state.json``. The reported connector URL is the
+stable domain ``https://<domain>``. ``destroy`` tears down a recorded instance.
 
 ``--dry-run`` is the critical safe mode: with ``--dry-run`` (and ``--json``) the
-command contacts no network, requires no token, opens no SSH, and prints exactly
-one JSON document describing the ordered plan, target ``app_dir`` /
-``service_user``, and the rendered command summary, then exits 0.
+command contacts no network, requires no token, opens no SSH, runs no DNS
+automation, and prints exactly one JSON document describing the ordered plan,
+target ``app_dir`` / ``service_user`` / ``domain``, and the rendered command
+summary, then exits 0.
 
 This is standalone deploy tooling and does not import the legal pipeline's
 source-access internals.
@@ -32,7 +38,6 @@ import argparse
 import json
 import os
 import secrets as _secrets_mod
-import shlex
 import socket
 import subprocess
 import sys
@@ -43,7 +48,7 @@ from typing import Any, Sequence
 from deploy.bootstrap import (
     APP_SERVICE_NAME,
     DEFAULT_APP_PORT,
-    NGROK_SERVICE_NAME,
+    DEFAULT_DOMAIN,
     render_bootstrap_script,
     render_env_file,
     render_systemd_units,
@@ -55,13 +60,15 @@ from deploy.cloudzy import (
     CreateInstanceRequest,
     created_instance_id,
 )
-from deploy.ngrok import oauth_env_updates
+from deploy.domain import (
+    dns_host_label,
+    oauth_env_updates_for_domain,
+    public_url_for_domain,
+)
 from deploy.secrets import (
     CLOUDZY_TOKEN_KEY,
-    NGROK_AUTHTOKEN_ENV_VAR,
     DeploySecretError,
     load_deploy_secrets,
-    redact_secret,
 )
 
 # --- MCP / OAuth env keys written to the remote env file --------------------
@@ -70,7 +77,20 @@ MCP_SIGNING_KEY = "LEGAL_MCP_OAUTH_SIGNING_KEY"
 MCP_LOGIN_SECRET = "LEGAL_MCP_OAUTH_LOGIN_SECRET"
 MCP_ALLOWED_EMAILS = "LEGAL_MCP_ALLOWED_EMAILS"
 MCP_AUTH_ENABLED = "LEGAL_MCP_AUTH_ENABLED"
+MCP_TOKEN_TTL = "LEGAL_MCP_OAUTH_TOKEN_TTL_SECONDS"
 API_KEY_ENV = "LEGAL_API_KEY"
+
+#: Production runtime defaults seeded into the remote env when not already
+#: supplied via the deploy env file (``secrets.extra``). Mirrors the values the
+#: legacy ``deploy_domain.sh`` hardcoded: browser-backed sources egress through
+#: an Argentine AnyIP proxy, and access tokens last 24h (clients silently renew
+#: via the refresh token).
+DEFAULT_RUNTIME_ENV = {
+    "LEGAL_PROXY_ENABLED": "true",
+    "LEGAL_PROXY_PROVIDER": "anyip",
+    "LEGAL_PROXY_COUNTRY": "ar",
+    MCP_TOKEN_TTL: "86400",
+}
 
 #: Default allowed email for the single-user MCP login.
 DEFAULT_ALLOWED_EMAIL = "ayacuchovictor@gmail.com"
@@ -226,48 +246,65 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
         }
 
     # deploy plan
-    rendered_env_keys = [CLOUDZY_TOKEN_KEY, "LEGAL_CAPSOLVER_API_KEY"]
+    domain = getattr(args, "domain", DEFAULT_DOMAIN)
+    public_url = public_url_for_domain(domain)
+    fresh = bool(args.fresh)
+    dns_repoint = fresh and not getattr(args, "no_dns", False)
+
+    rendered_env_keys = [
+        MCP_AUTH_ENABLED,
+        "LEGAL_MCP_PUBLIC_URL",
+        "LEGAL_MCP_OAUTH_ISSUER",
+        CLOUDZY_TOKEN_KEY,
+        "LEGAL_CAPSOLVER_API_KEY",
+    ]
     remote_commands = [
-        f"ssh {args.ssh_user}@<ip> : run rendered bootstrap.sh "
-        "(apt deps, uv, ngrok, service user, uv sync, vendor profiles, "
-        "systemd units)",
-        "ssh : write remote env file via render_env_file (chmod 600)",
-        f"systemctl enable --now {APP_SERVICE_NAME}.service "
-        f"{NGROK_SERVICE_NAME}.service",
-        f"curl http://127.0.0.1:{app_port}/healthz : verify API health",
-        "query ngrok local API for the public tunnel URL",
+        f"ssh {args.ssh_user}@<ip> : write remote env file via render_env_file "
+        "(chmod 600, bare-domain public URL)",
+        f"ssh : run rendered bootstrap.sh (apt deps, uv, caddy, service user, "
+        f"uv sync, vendor profiles, app unit, Caddyfile for {domain})",
+        f"systemctl enable --now {APP_SERVICE_NAME}.service caddy",
+        f"curl http://127.0.0.1:{app_port}/healthz : verify local API health",
+        f"curl https://{domain}/healthz : verify public health (TLS)",
     ]
 
-    steps = [
-        "load deploy secrets (Cloudzy token + ngrok authtoken)",
-        (
-            "reuse recorded instance"
-            if (not args.fresh and load_state(args.state_file).get("instance_id"))
-            else "provision a new Cloudzy instance"
-        ),
-        "poll the instance until it reaches a ready state",
-        f"wait for SSH on port {SSH_PORT} (paramiko)",
-        f"sync the repo into {app_dir} (rsync over ssh)",
-        f"write remote env file {remote_env_file} (chmod 600)",
-        "run the rendered bootstrap script remotely",
-        f"uv sync in {app_dir}",
-        f"start systemd services ({', '.join(units)})",
-        f"verify API health at /healthz on port {app_port}",
-        "discover the ngrok public URL",
-        "record deployment state locally",
-    ]
+    steps = ["load deploy secrets (Cloudzy token + runtime secrets)"]
+    steps.append(
+        "reuse recorded instance"
+        if (not fresh and load_state(args.state_file).get("instance_id"))
+        else "provision a new Cloudzy instance"
+    )
+    steps.append("poll the instance until it reaches a ready state")
+    steps.append(f"wait for SSH on port {SSH_PORT} (paramiko)")
+    if dns_repoint:
+        steps.append(
+            f"repoint Namecheap A record {domain} (host "
+            f"'{dns_host_label(domain)}') -> the new IP via nc_browser.py"
+        )
+        steps.append(f"wait for DNS to resolve {domain} to the new IP")
+    steps.append(f"sync the repo into {app_dir} (rsync over ssh)")
+    steps.append(f"write remote env file {remote_env_file} (chmod 600)")
+    steps.append(f"run the rendered bootstrap script remotely (installs Caddy for {domain})")
+    steps.append(f"uv sync in {app_dir}")
+    steps.append(f"start systemd service(s) ({', '.join(units)}) + caddy")
+    steps.append(f"verify API health at /healthz on port {app_port}")
+    steps.append(f"verify public health at https://{domain}/healthz")
+    steps.append("record deployment state locally")
 
     return {
         "action": "deploy",
         "app_dir": app_dir,
         "service_user": service_user,
         "app_port": app_port,
+        "domain": domain,
+        "public_url": public_url,
         "remote_env_file": remote_env_file,
         "ssh_user": args.ssh_user,
         "region": args.region,
         "product": args.product,
         "hostname": args.hostname,
-        "fresh": bool(args.fresh),
+        "fresh": fresh,
+        "dns_repoint": dns_repoint,
         "state_file": str(_state_file(args.state_file)),
         "steps": steps,
         "systemd_units": list(units),
@@ -282,7 +319,6 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
 def _load_secrets(args: argparse.Namespace, *, require: bool) -> Any:
     return load_deploy_secrets(
         deploy_env_file=args.deploy_env_file,
-        ngrok_config_file=args.ngrok_config_file,
         require=require,
     )
 
@@ -364,15 +400,19 @@ def _sync_repo(ip: str, *, user: str, app_dir: str, key_path: str | None) -> Non
 def _build_mcp_env(
     secrets: Any,
     *,
+    domain: str,
     allowed_email: str,
     reuse: dict[str, Any] | None = None,
 ) -> dict[str, str]:
-    """Build the remote env mapping (secrets + MCP/OAuth config).
+    """Build the remote env mapping (secrets + MCP/OAuth config + public URL).
 
     Generates strong OAuth signing/login secrets and a ``LEGAL_API_KEY`` the
     first time, reusing values recorded in ``reuse`` (the prior deploy state) on
-    a redeploy so issued tokens stay valid. The public URL / issuer are set
-    later, once the ngrok tunnel is discovered.
+    a redeploy so issued tokens stay valid. The public URL / issuer are the
+    **bare domain** (Caddy serves the MCP transport at the domain root), set up
+    front here — no post-deploy discovery round-trip. Production runtime
+    defaults (Argentine AnyIP proxy, 24h token TTL) are seeded only when the
+    deploy env file does not already provide them.
     """
     reuse = reuse or {}
     env: dict[str, str] = {}
@@ -382,36 +422,21 @@ def _build_mcp_env(
         if value:
             env[key] = value
 
+    # Seed production runtime defaults without overriding anything the deploy
+    # env file explicitly set.
+    for key, value in DEFAULT_RUNTIME_ENV.items():
+        env.setdefault(key, value)
+
     env[MCP_AUTH_ENABLED] = "true"
     env[MCP_ALLOWED_EMAILS] = allowed_email
+    # Bare-domain public URL + issuer (== resource == connector URL).
+    env.update(oauth_env_updates_for_domain(domain))
     env[MCP_SIGNING_KEY] = reuse.get(MCP_SIGNING_KEY) or _secrets_mod.token_urlsafe(48)
     env[MCP_LOGIN_SECRET] = (
         reuse.get(MCP_LOGIN_SECRET) or _secrets_mod.token_urlsafe(24)
     )
     env[API_KEY_ENV] = reuse.get(API_KEY_ENV) or _secrets_mod.token_urlsafe(24)
     return env
-
-
-def _append_remote_env(client_ssh: Any, env_file: str, updates: dict[str, str]) -> None:
-    """Append ``KEY=VALUE`` updates to the remote env file (idempotent-ish).
-
-    Replaces any existing line for each key, then appends the new value, keeping
-    the file at chmod 600. Values are single-quoted for the shell heredoc.
-    """
-    if not updates:
-        return
-    q_file = shlex.quote(env_file)
-    lines = [f"touch {q_file}", f"chmod 600 {q_file}"]
-    for key, value in updates.items():
-        # Drop any prior definition, then append the new one.
-        lines.append(f"sed -i {shlex.quote(f'/^{key}=/d')} {q_file}")
-        lines.append(f"printf '%s\\n' {shlex.quote(f'{key}={value}')} >> {q_file}")
-    script = "\n".join(lines)
-    code, _out, err = _run_remote(
-        client_ssh, f"bash -s <<'LEGAL_DEPLOY_ENVUP_EOF'\n{script}\nLEGAL_DEPLOY_ENVUP_EOF"
-    )
-    if code != 0:
-        raise DeployError(f"remote env update failed (exit {code}): {err.strip()}")
 
 
 def run_deploy(args: argparse.Namespace) -> dict[str, Any]:
@@ -451,28 +476,51 @@ def run_deploy(args: argparse.Namespace) -> dict[str, Any]:
     finally:
         client.close()
 
-    wait_for_ssh(
-        ip, timeout=args.ssh_timeout, interval=args.ssh_interval
-    )
+    wait_for_ssh(ip, timeout=args.ssh_timeout, interval=args.ssh_interval)
 
+    domain = args.domain
+    public_url = public_url_for_domain(domain)
     remote_env_file = args.remote_env_file or str(
         PurePosixPath(args.app_dir) / ".env"
     )
 
+    # On a fresh provision the instance has a brand-new IP. Record it early so a
+    # later DNS/deploy failure can't orphan the VPS, then repoint the Namecheap
+    # A record at it and wait for DNS to resolve (Caddy needs the A record live
+    # to issue a Let's Encrypt certificate). Skipped with --no-dns.
+    dns: dict[str, Any] | None = None
+    if args.fresh:
+        save_state(
+            {
+                "instance_id": instance_id,
+                "ip": ip,
+                "domain": domain,
+                "app_dir": args.app_dir,
+                "service_user": args.service_user,
+                "ssh_user": args.ssh_user,
+            },
+            args.state_file,
+        )
+        if not args.no_dns:
+            dns = _repoint_dns(domain, ip)
+            dns["resolved"] = _wait_for_dns(
+                domain, ip, timeout=args.dns_timeout, interval=args.dns_interval
+            )
+
     allowed_email = getattr(args, "allowed_email", None) or DEFAULT_ALLOWED_EMAIL
-    # Build the full remote env: deploy secrets + MCP/OAuth config. Reuse the
-    # signing key / login secret / API key from prior state on a redeploy so any
-    # already-issued bearer token keeps validating.
+    # Build the full remote env: deploy secrets + MCP/OAuth config + the
+    # bare-domain public URL/issuer (set up front; Caddy serves at the domain
+    # root). Reuse the signing key / login secret / API key from prior state on
+    # a redeploy so any already-issued bearer token keeps validating.
     env_mapping = _build_mcp_env(
-        secrets, allowed_email=allowed_email, reuse=state
+        secrets, domain=domain, allowed_email=allowed_email, reuse=state
     )
-    # Persist the OAuth signing config locally so smoke_codex / the orchestrator
-    # can mint a bearer token without a browser flow.
     signing_key = env_mapping[MCP_SIGNING_KEY]
 
     bootstrap_script = render_bootstrap_script(
         app_dir=args.app_dir,
         service_user=args.service_user,
+        domain=domain,
         app_port=args.app_port,
         app_env_file=remote_env_file,
     )
@@ -484,9 +532,7 @@ def run_deploy(args: argparse.Namespace) -> dict[str, Any]:
 
     client_ssh = _ssh_connect(ip, user=args.ssh_user, key_path=args.ssh_key_file)
     api_health: dict[str, Any] | None = None
-    ngrok_url: str | None = None
     try:
-        # Ensure the app dir exists before syncing.
         _run_remote(client_ssh, f"mkdir -p {args.app_dir}")
         _sync_repo(
             ip,
@@ -495,9 +541,9 @@ def run_deploy(args: argparse.Namespace) -> dict[str, Any]:
             key_path=args.ssh_key_file,
         )
 
-        # Write env file (chmod 600) then run bootstrap (installs deps incl.
-        # ngrok + uv, uv sync, vendors BotBrowser, installs + starts the systemd
-        # services).
+        # Write env file (chmod 600, bare-domain public URL) then run bootstrap
+        # (installs deps incl. uv + Caddy, uv sync, vendors BotBrowser, installs
+        # the app unit, writes/enables the Caddyfile fronting the domain).
         for label, script in (
             ("env-file", env_snippet),
             ("bootstrap", bootstrap_script),
@@ -511,43 +557,7 @@ def run_deploy(args: argparse.Namespace) -> dict[str, Any]:
                     f"remote {label} step failed (exit {code}): {err.strip()[:800]}"
                 )
 
-        # Configure ngrok's authtoken AFTER bootstrap has installed ngrok. The
-        # ngrok systemd unit runs as the service user, so the authtoken must
-        # live in THAT user's ngrok config; then restart the unit so the tunnel
-        # authenticates. The token never appears in logged output.
-        if secrets.ngrok_authtoken:
-            home = f"/home/{args.service_user}"
-            _run_remote(
-                client_ssh,
-                "sudo -u {u} env HOME={h} ngrok config add-authtoken {t} "
-                "|| ngrok config add-authtoken {t} || true".format(
-                    u=shlex.quote(args.service_user),
-                    h=shlex.quote(home),
-                    t=shlex.quote(secrets.ngrok_authtoken),
-                ),
-            )
-            _run_remote(
-                client_ssh,
-                f"systemctl restart {NGROK_SERVICE_NAME}.service || true",
-            )
-
-        # Discover the ngrok public URL from the local agent API, retrying while
-        # the tunnel comes up.
-        ngrok_url = _discover_ngrok_url(client_ssh)
-
-        # Point the runtime OAuth metadata / MCP public URL at the tunnel, then
-        # restart the app so the new env takes effect.
-        if ngrok_url:
-            _append_remote_env(
-                client_ssh, remote_env_file, oauth_env_updates(ngrok_url)
-            )
-            _run_remote(
-                client_ssh,
-                f"systemctl restart {APP_SERVICE_NAME}.service || true",
-            )
-            time.sleep(5)
-
-        # Verify health (after restart).
+        # Verify local API health (Caddy fronts it on the public domain).
         code, out, _ = _run_remote(
             client_ssh,
             f"curl -fsS http://127.0.0.1:{args.app_port}/healthz || true",
@@ -556,8 +566,12 @@ def run_deploy(args: argparse.Namespace) -> dict[str, Any]:
     finally:
         client_ssh.close()
 
-    mcp_url = f"{ngrok_url}/mcp" if ngrok_url else None
-    issuer = oauth_env_updates(ngrok_url)["LEGAL_MCP_OAUTH_ISSUER"] if ngrok_url else None
+    # Verify the PUBLIC endpoint (through Caddy + TLS), retrying while the
+    # certificate issues. A miss here is a soft warning, not a hard failure:
+    # Caddy retries ACME on its own and DNS propagation can lag.
+    public_health = _check_public_health(domain)
+
+    mcp_url = public_url  # the bare-domain connector URL
 
     new_state = {
         "instance_id": instance_id,
@@ -565,8 +579,8 @@ def run_deploy(args: argparse.Namespace) -> dict[str, Any]:
         "app_dir": args.app_dir,
         "service_user": args.service_user,
         "app_port": args.app_port,
+        "domain": domain,
         "remote_env_file": remote_env_file,
-        "ngrok_url": ngrok_url,
         "mcp_url": mcp_url,
         "ssh_user": args.ssh_user,
         "allowed_email": allowed_email,
@@ -576,7 +590,7 @@ def run_deploy(args: argparse.Namespace) -> dict[str, Any]:
         MCP_ALLOWED_EMAILS: allowed_email,
         MCP_LOGIN_SECRET: env_mapping[MCP_LOGIN_SECRET],
         API_KEY_ENV: env_mapping[API_KEY_ENV],
-        "oauth_issuer": issuer,
+        "oauth_issuer": public_url,
         "oauth_resource": mcp_url,
     }
     state_path = save_state(new_state, args.state_file)
@@ -586,63 +600,127 @@ def run_deploy(args: argparse.Namespace) -> dict[str, Any]:
         "command": "deploy",
         "instance_id": instance_id,
         "ip": ip,
-        "ngrok_url": ngrok_url,
+        "domain": domain,
         "mcp_url": mcp_url,
         "api_health": api_health,
+        "public_health": public_health,
+        "dns": dns,
         "state_file": str(state_path),
         "secrets": secrets.diagnostics(),
-        "next_steps": _next_steps(ip, ngrok_url, mcp_url),
+        "next_steps": _next_steps(ip, mcp_url, public_health),
     }
 
 
-def _discover_ngrok_url(
-    client_ssh: Any, *, attempts: int = 30, interval: float = 5.0
-) -> str | None:
-    """Poll the remote ngrok agent API for the public https tunnel URL."""
-    for _ in range(attempts):
-        code, out, _ = _run_remote(
-            client_ssh,
-            "curl -fsS http://127.0.0.1:4040/api/tunnels || true",
-        )
-        url = _parse_ngrok_url(out)
-        if url:
-            return url
-        time.sleep(interval)
-    return None
+# -- Namecheap DNS + public health helpers ----------------------------------
 
 
-def _parse_ngrok_url(body: str) -> str | None:
-    if not body.strip():
-        return None
+def _repoint_dns(domain: str, ip: str) -> dict[str, Any]:
+    """Repoint the Namecheap A record for ``domain`` at ``ip``.
+
+    Shells out LOCALLY to the namecheap-domains skill's browser automation
+    (``nc_browser.py dns-set-ip <domain> <ip> --host <label>``), which logs into
+    Namecheap with the saved Firefox profile, deletes existing records on the
+    host, and writes a single A record (idempotent, self-verifying). Only DNS
+    data (domain/host/ip) is handled here — never a secret. Raises
+    :class:`DeployError` on failure so the caller can surface the recorded IP for
+    a manual repoint + redeploy.
+    """
+    script = (
+        Path(__file__).resolve().parent.parent
+        / ".claude"
+        / "skills"
+        / "namecheap-domains"
+        / "scripts"
+        / "nc_browser.py"
+    )
+    if not script.exists():
+        raise DeployError(f"namecheap DNS script not found: {script}")
+    host = dns_host_label(domain)
+    base = ["uv", "run", "python", str(script)]
+    # Best-effort: ensure a browser session exists (ignore "already running").
+    subprocess.run(base + ["start"], capture_output=True, text=True)
+    proc = subprocess.run(
+        base + ["dns-set-ip", domain, ip, "--host", host],
+        capture_output=True,
+        text=True,
+    )
+    out = (proc.stdout or "").strip()
     try:
-        data = json.loads(body)
+        parsed = json.loads(out) if out else {}
     except ValueError:
-        return None
-    tunnels = data.get("tunnels") if isinstance(data, dict) else None
-    if not isinstance(tunnels, list):
-        return None
-    https = None
-    for tunnel in tunnels:
-        url = tunnel.get("public_url") if isinstance(tunnel, dict) else None
-        if isinstance(url, str):
-            if url.startswith("https://"):
-                return url
-            https = https or url
-    return https
+        parsed = {}
+    if proc.returncode != 0 or not parsed.get("ok", False):
+        detail = (out or proc.stderr or "").strip()[:500]
+        raise DeployError(
+            f"namecheap DNS repoint of {domain} -> {ip} failed: {detail}"
+        )
+    return {
+        "domain": domain,
+        "host": host,
+        "ip": ip,
+        "ok": True,
+        "records": parsed.get("records"),
+    }
 
 
-def _next_steps(ip: str, ngrok_url: str | None, mcp_url: str | None) -> list[str]:
-    steps = [f"VPS provisioned at {ip}."]
-    if mcp_url:
-        steps.append(f"Connect your MCP client to {mcp_url}.")
+def _dns_resolves_to(domain: str, ip: str) -> bool:
+    try:
+        infos = socket.getaddrinfo(domain, None)
+    except OSError:
+        return False
+    return any(info[4][0] == ip for info in infos)
+
+
+def _wait_for_dns(
+    domain: str, ip: str, *, timeout: float, interval: float
+) -> bool:
+    """Block until ``domain`` resolves to ``ip`` or ``timeout`` elapses.
+
+    Returns ``True`` once resolved, ``False`` on timeout. A timeout is non-fatal
+    (Caddy retries ACME on its own and public resolvers can lag the registrar).
+    """
+    deadline = time.monotonic() + timeout
+    while True:
+        if _dns_resolves_to(domain, ip):
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(interval)
+
+
+def _check_public_health(
+    domain: str, *, attempts: int = 12, interval: float = 10.0
+) -> dict[str, Any]:
+    """Check ``https://<domain>/healthz``, retrying while TLS issues (soft)."""
+    url = f"https://{domain}/healthz"
+    last = ""
+    for attempt in range(attempts):
+        proc = subprocess.run(
+            ["curl", "-fsS", "--max-time", "20", url],
+            capture_output=True,
+            text=True,
+        )
+        if proc.returncode == 0:
+            return {"reachable": True, "url": url, "body": proc.stdout.strip()[:300]}
+        last = (proc.stderr or proc.stdout or "").strip()[:200]
+        if attempt < attempts - 1:
+            time.sleep(interval)
+    return {"reachable": False, "url": url, "detail": last}
+
+
+def _next_steps(
+    ip: str, mcp_url: str, public_health: dict[str, Any] | None
+) -> list[str]:
+    steps = [f"VPS provisioned/updated at {ip}."]
+    if public_health and public_health.get("reachable"):
+        steps.append(f"Paste {mcp_url} into a Claude Cowork connector.")
     else:
         steps.append(
-            "ngrok URL not yet available; re-run deploy or check the "
-            "legal-ngrok service on the VPS."
+            f"App is up locally but {mcp_url} did not pass a public health "
+            "check yet (TLS may still be issuing); recheck in ~30s or inspect "
+            "`journalctl -u caddy` on the VPS."
         )
-    steps.append(
-        "Run `python -m deploy.deploy destroy` to tear the VPS down."
-    )
+    steps.append("Run `python -m deploy.deploy destroy` to tear the VPS down.")
     return steps
 
 
@@ -731,8 +809,10 @@ def _emit_human(envelope: dict[str, Any]) -> None:
     if envelope.get("command") == "deploy":
         print(f"instance_id: {envelope.get('instance_id')}")
         print(f"ip:          {envelope.get('ip')}")
-        print(f"ngrok_url:   {envelope.get('ngrok_url')}")
+        print(f"domain:      {envelope.get('domain')}")
         print(f"mcp_url:     {envelope.get('mcp_url')}")
+        health = envelope.get("public_health") or {}
+        print(f"public:      {'OK' if health.get('reachable') else 'pending TLS'}")
         for step in envelope.get("next_steps", []):
             print(f"  - {step}")
     else:
@@ -767,7 +847,7 @@ def _add_common_flags(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help=(
             "Print a JSON plan of the deploy without contacting Cloudzy/SSH/"
-            "ngrok or requiring a token; exits 0."
+            "DNS or requiring a token; exits 0."
         ),
     )
     parser.add_argument(
@@ -812,11 +892,6 @@ def _add_common_flags(parser: argparse.ArgumentParser) -> None:
         help="Override the deploy secret env file path.",
     )
     parser.add_argument(
-        "--ngrok-config-file",
-        default=None,
-        help="Override the ngrok config file path.",
-    )
-    parser.add_argument(
         "--state-file",
         default=None,
         help=f"Local deployment state file (default: {STATE_FILE}).",
@@ -838,6 +913,34 @@ def build_parser() -> argparse.ArgumentParser:
         "--fresh",
         action="store_true",
         help="Ignore recorded state and provision a new instance.",
+    )
+    deploy.add_argument(
+        "--domain",
+        default=DEFAULT_DOMAIN,
+        help=(
+            "Public domain Caddy fronts; also the bare connector URL "
+            f"https://<domain> (default: {DEFAULT_DOMAIN})."
+        ),
+    )
+    deploy.add_argument(
+        "--no-dns",
+        action="store_true",
+        help=(
+            "Skip the automatic Namecheap A-record repoint on --fresh "
+            "(point DNS at the new IP yourself, then re-run deploy)."
+        ),
+    )
+    deploy.add_argument(
+        "--dns-timeout",
+        type=float,
+        default=600.0,
+        help="Seconds to wait for DNS to resolve to a fresh IP (default: 600).",
+    )
+    deploy.add_argument(
+        "--dns-interval",
+        type=float,
+        default=15.0,
+        help="DNS-resolution poll interval in seconds (default: 15).",
     )
     deploy.add_argument("--region", default=DEFAULT_REGION, help="Cloudzy region id.")
     deploy.add_argument(

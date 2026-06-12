@@ -61,12 +61,43 @@ def test_destroy_dry_run_no_network(capsys, monkeypatch):
     assert doc["plan"]["instance_id"] == "inst-123"
 
 
-def test_read_without_token_returns_error_envelope(capsys, monkeypatch):
+def test_read_without_token_returns_error_envelope(capsys, monkeypatch, tmp_path):
+    # No env var AND no deploy.env token -> a real read must error.
     monkeypatch.delenv("CLOUDZY_API_TOKEN", raising=False)
+    monkeypatch.setenv("LEGAL_DEPLOY_ENV_FILE", str(tmp_path / "absent.env"))
     code, doc = _run(capsys, ["regions"])
     assert code == 1
     assert doc["ok"] is False
     assert doc["error"]["code"] == "cloudzy_error"
+
+
+def test_token_resolved_from_deploy_env_when_env_unset(capsys, monkeypatch, tmp_path):
+    # When --token and CLOUDZY_API_TOKEN are absent, cloudzy_cli falls back to
+    # the gitignored deploy.env (same source the orchestrator uses).
+    monkeypatch.delenv("CLOUDZY_API_TOKEN", raising=False)
+    env_file = tmp_path / "deploy.env"
+    env_file.write_text("CLOUDZY_API_TOKEN=tok-from-file\n", encoding="utf-8")
+    monkeypatch.setenv("LEGAL_DEPLOY_ENV_FILE", str(env_file))
+
+    captured: dict[str, object] = {}
+
+    class _FakeClient:
+        def __init__(self, token=None):
+            captured["token"] = token
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def list_regions(self):
+            return ["r1"]
+
+    monkeypatch.setattr(cloudzy_cli, "CloudzyClient", _FakeClient)
+    code, doc = _run(capsys, ["regions"])
+    assert code == 0
+    assert captured["token"] == "tok-from-file"
 
 
 def test_no_subcommand_is_usage_error(capsys):
