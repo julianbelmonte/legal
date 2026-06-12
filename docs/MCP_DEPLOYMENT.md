@@ -1,11 +1,22 @@
 # MCP Deployment Runbook
 
 End-to-end runbook for the legal MCP server: local development, OAuth
-configuration, Cloudzy VPS provisioning, ngrok public URLs, remote smoke
+configuration, Cloudzy VPS provisioning, the Caddy/HTTPS domain, remote smoke
 testing, Claude Cowork connector setup, troubleshooting, and teardown.
 
-The deliverable of a deploy is a single HTTPS **MCP URL** (ending in `/mcp`)
-that you paste into a Claude Cowork custom connector. The connector
+> **Deploy model (current).** `python -m deploy.deploy deploy` is the single
+> path. It fronts the app with **Caddy** on a stable HTTPS domain (default
+> `mcp.arglegal.live`) and reports the **bare domain** `https://<domain>` as the
+> connector URL. On `deploy --fresh` it provisions a new VPS and auto-repoints
+> the Namecheap DNS A record at the new IP (via the `namecheap-domains` skill),
+> then waits for DNS before Caddy issues TLS. ngrok and the separate
+> `deploy/deploy_domain.sh` script have been **removed** (folded into the Python
+> orchestrator); sections below that mention them are historical. No
+> `NGROK_AUTHTOKEN` is needed.
+
+The deliverable of a deploy is a single HTTPS **MCP URL** — the bare domain
+`https://<domain>` (Caddy serves the MCP transport at the root; do not append
+`/mcp`) — that you paste into a Claude Cowork custom connector. The connector
 authenticates over OAuth, restricted to a single allowed email.
 
 > Never print, log, or commit raw token values. The deploy tooling redacts
