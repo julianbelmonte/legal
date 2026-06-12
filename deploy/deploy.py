@@ -186,6 +186,45 @@ def _instance_id(instance: Any) -> str | None:
     return None
 
 
+def _local_pubkey_body() -> str | None:
+    """Return the base64 body of this machine's local SSH public key, if any."""
+    ssh_dir = Path.home() / ".ssh"
+    for name in ("id_ed25519.pub", "id_rsa.pub", "id_ecdsa.pub"):
+        path = ssh_dir / name
+        if path.exists():
+            parts = path.read_text(encoding="utf-8", errors="ignore").split()
+            if len(parts) >= 2:
+                return parts[1]
+    return None
+
+
+def _matching_ssh_key_ids(client: Any) -> list[str]:
+    """Return registered Cloudzy SSH key ids matching the local public key.
+
+    Lets ``deploy --fresh`` attach the right key without a hardcoded id: the
+    new VPS authorizes this machine's key so the deploy can connect over SSH.
+    """
+    body = _local_pubkey_body()
+    if not body:
+        return []
+    try:
+        raw = client.list_ssh_keys()
+    except Exception:
+        return []
+    keys = raw if isinstance(raw, list) else (
+        raw.get("data") or raw.get("sshKeys") or raw.get("ssh_keys") or []
+        if isinstance(raw, dict)
+        else []
+    )
+    ids: list[str] = []
+    for key in keys:
+        if isinstance(key, dict) and body in json.dumps(key):
+            kid = key.get("id") or key.get("uuid")
+            if kid is not None:
+                ids.append(str(kid))
+    return ids
+
+
 def _instance_ip(instance: Any) -> str | None:
     if not isinstance(instance, dict):
         return None
@@ -455,12 +494,22 @@ def run_deploy(args: argparse.Namespace) -> dict[str, Any]:
         if instance_id:
             instance = client.get_instance(instance_id)
         else:
+            # Attach an SSH key so the deploy can log in over key auth. Use the
+            # explicit --ssh-key ids, else auto-resolve the registered Cloudzy
+            # key(s) matching this machine's local public key. Without a key the
+            # VPS only has a (emailed) root password and SSH auth fails.
+            ssh_keys = list(args.ssh_key) if args.ssh_key else _matching_ssh_key_ids(client)
+            if not ssh_keys:
+                raise DeployError(
+                    "no SSH key to attach: pass --ssh-key <cloudzy-key-id> or "
+                    "register this machine's ~/.ssh/*.pub key in Cloudzy"
+                )
             request = CreateInstanceRequest(
                 region=args.region,
                 product=args.product,
                 operating_system=args.os,
                 hostname=args.hostname,
-                ssh_keys=list(args.ssh_key or []),
+                ssh_keys=ssh_keys,
                 label=args.label,
             )
             instance = client.create_instance(request)
