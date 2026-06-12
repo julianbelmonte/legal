@@ -92,8 +92,9 @@ DEFAULT_RUNTIME_ENV = {
     MCP_TOKEN_TTL: "86400",
 }
 
-#: Default allowed email for the single-user MCP login.
-DEFAULT_ALLOWED_EMAIL = "ayacuchovictor@gmail.com"
+#: Default allowed email for the single-user MCP login (the production
+#: allow-list; override with --allowed-email).
+DEFAULT_ALLOWED_EMAIL = "yoli@arglegal.live"
 
 # -- defaults ----------------------------------------------------------------
 
