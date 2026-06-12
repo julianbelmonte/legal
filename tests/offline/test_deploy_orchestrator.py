@@ -188,9 +188,13 @@ def test_repoint_dns_success(monkeypatch):
     assert res["ok"] is True
     assert res["host"] == "mcp"
     assert res["ip"] == "1.2.3.4"
-    # The dns-set-ip invocation carried the resolved host label.
+    # The session is logged in before any DNS mutation.
+    assert any("login" in c for c in calls)
+    # dns-set-ip targets the REGISTERED apex domain + host label (not the full
+    # subdomain), and carries the new IP.
     set_ip = next(c for c in calls if "dns-set-ip" in c)
-    assert "mcp.arglegal.live" in set_ip and "1.2.3.4" in set_ip
+    assert "arglegal.live" in set_ip and "mcp.arglegal.live" not in set_ip
+    assert "1.2.3.4" in set_ip
     assert "--host" in set_ip and "mcp" in set_ip
 
 

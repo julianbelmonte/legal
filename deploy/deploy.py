@@ -64,6 +64,7 @@ from deploy.domain import (
     dns_host_label,
     oauth_env_updates_for_domain,
     public_url_for_domain,
+    registered_domain,
 )
 from deploy.secrets import (
     CLOUDZY_TOKEN_KEY,
@@ -638,12 +639,19 @@ def _repoint_dns(domain: str, ip: str) -> dict[str, Any]:
     )
     if not script.exists():
         raise DeployError(f"namecheap DNS script not found: {script}")
+    # The Namecheap DNS UI is managed at the registered (apex) domain with a
+    # host label, NOT the full subdomain: arglegal.live + --host mcp.
+    apex = registered_domain(domain)
     host = dns_host_label(domain)
     base = ["uv", "run", "python", str(script)]
-    # Best-effort: ensure a browser session exists (ignore "already running").
+    # Ensure a logged-in browser session: `start` launches the persistent
+    # browser, `login` authenticates it (dns ops fail / see no records without
+    # this). Both are best-effort here — a real failure surfaces as a non-ok
+    # dns-set-ip below.
     subprocess.run(base + ["start"], capture_output=True, text=True)
+    subprocess.run(base + ["login"], capture_output=True, text=True)
     proc = subprocess.run(
-        base + ["dns-set-ip", domain, ip, "--host", host],
+        base + ["dns-set-ip", apex, ip, "--host", host],
         capture_output=True,
         text=True,
     )

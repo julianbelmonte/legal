@@ -64,3 +64,18 @@ def dns_host_label(domain: str) -> str:
     if len(labels) <= 2:
         return "@"
     return labels[0]
+
+
+def registered_domain(domain: str) -> str:
+    """Return the registered (apex) domain for ``domain``.
+
+    ``mcp.arglegal.live`` -> ``"arglegal.live"``; an apex ``arglegal.live`` is
+    returned unchanged. The Namecheap DNS UI is managed at the registered-domain
+    level, so the ``nc_browser.py dns-set-ip`` call takes this apex plus the
+    ``--host`` label from :func:`dns_host_label` (not the full subdomain).
+    Assumes a single-label public suffix (true for ``.live``).
+    """
+    host = domain.strip().strip(".")
+    if not host:
+        raise ValueError("domain must be a non-empty hostname")
+    return ".".join(host.split(".")[-2:])

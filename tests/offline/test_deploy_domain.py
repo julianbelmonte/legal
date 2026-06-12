@@ -15,6 +15,7 @@ from deploy.domain import (
     dns_host_label,
     oauth_env_updates_for_domain,
     public_url_for_domain,
+    registered_domain,
 )
 
 
@@ -45,6 +46,19 @@ def test_oauth_env_issuer_equals_public_equals_bare_domain() -> None:
 )
 def test_dns_host_label(domain: str, expected_host: str) -> None:
     assert dns_host_label(domain) == expected_host
+
+
+@pytest.mark.parametrize(
+    ("domain", "expected_apex"),
+    [
+        ("mcp.arglegal.live", "arglegal.live"),
+        ("arglegal.live", "arglegal.live"),
+        ("www.example.org", "example.org"),
+    ],
+)
+def test_registered_domain(domain: str, expected_apex: str) -> None:
+    # Namecheap manages DNS at the registered apex, not the full subdomain.
+    assert registered_domain(domain) == expected_apex
 
 
 def test_empty_domain_rejected() -> None:
