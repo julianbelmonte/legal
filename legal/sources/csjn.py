@@ -15,7 +15,7 @@ from legal.browser import (
 )
 from legal.errors import usage_error
 from legal.models import JsonDict, LegalDocument, LegalError, LegalItem, LegalResponse, PageInfo, Provenance
-from legal.parsing import HtmlNode, parse_html
+from legal.parsing import HtmlNode, normalize_date, parse_html
 from legal.pdf import DEGRADED_FALLBACK_WARNING, extract_text_detailed
 from legal.registry import SOURCE_BY_ID
 from legal.sources import SourceAdapter, register_adapter
@@ -825,16 +825,34 @@ def _click_buscar(page: Any) -> None:
     )
 
 
+def _csjn_date(value: Any) -> str | None:
+    """Coerce a date input to the ``DD/MM/YYYY`` CSJN's form requires.
+
+    Callers (CLI/MCP/agents) naturally pass ISO ``YYYY-MM-DD``; the CSJN search
+    form only accepts Argentine ``DD/MM/YYYY`` and silently refuses to submit on
+    a malformed date (the page then never navigates, which looks like a captcha
+    rejection). Accept ISO or ``DD/MM/YYYY`` and normalize; pass through anything
+    unparseable so a caller-supplied literal still reaches the field.
+    """
+    iso = normalize_date(value)
+    if iso:
+        year, month, day = iso.split("-")
+        return f"{day}/{month}/{year}"
+    return _clean_text(value) or None
+
+
 def _fill_fallos_form(page: Any, args: argparse.Namespace, *, pace: int = 0) -> None:
     texto = _clean_text(getattr(args, "texto", None)) or ""
     page.query_selector('[name="texto"]').click()
     page.type('[name="texto"]', texto, delay=45 if pace else 35)
     if getattr(args, "partes", None):
         page.type('[name="partes"]', args.partes, delay=35)
-    if getattr(args, "fecha_desde", None):
-        page.fill('[name="fechaDesde"]', args.fecha_desde)
-    if getattr(args, "fecha_hasta", None):
-        page.fill('[name="fechaHasta"]', args.fecha_hasta)
+    fecha_desde = _csjn_date(getattr(args, "fecha_desde", None))
+    if fecha_desde:
+        page.fill('[name="fechaDesde"]', fecha_desde)
+    fecha_hasta = _csjn_date(getattr(args, "fecha_hasta", None))
+    if fecha_hasta:
+        page.fill('[name="fechaHasta"]', fecha_hasta)
     idx = TERMS_INDEX.get(getattr(args, "terms", "todas"), 0)
     page.evaluate(
         "(i)=>{const rs=document.querySelectorAll('[name=terminos]'); if(rs[i]) rs[i].checked=true;}",
