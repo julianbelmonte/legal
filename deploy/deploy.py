@@ -474,11 +474,20 @@ def _build_mcp_env(
     env[MCP_ALLOWED_EMAILS] = allowed_email
     # Bare-domain public URL + issuer (== resource == connector URL).
     env.update(oauth_env_updates_for_domain(domain))
-    env[MCP_SIGNING_KEY] = reuse.get(MCP_SIGNING_KEY) or _secrets_mod.token_urlsafe(48)
-    env[MCP_LOGIN_SECRET] = (
-        reuse.get(MCP_LOGIN_SECRET) or _secrets_mod.token_urlsafe(24)
+    # Stable OAuth secrets precedence: an explicit value in the deploy env file
+    # (already in ``env`` from ``secrets.extra``) wins, so an owner-chosen login
+    # secret / signing key / API key is honored; otherwise reuse the prior
+    # deploy's value (so issued tokens stay valid across redeploys); otherwise
+    # generate a strong one.
+    env[MCP_SIGNING_KEY] = (
+        env.get(MCP_SIGNING_KEY) or reuse.get(MCP_SIGNING_KEY) or _secrets_mod.token_urlsafe(48)
     )
-    env[API_KEY_ENV] = reuse.get(API_KEY_ENV) or _secrets_mod.token_urlsafe(24)
+    env[MCP_LOGIN_SECRET] = (
+        env.get(MCP_LOGIN_SECRET) or reuse.get(MCP_LOGIN_SECRET) or _secrets_mod.token_urlsafe(24)
+    )
+    env[API_KEY_ENV] = (
+        env.get(API_KEY_ENV) or reuse.get(API_KEY_ENV) or _secrets_mod.token_urlsafe(24)
+    )
     return env
 
 

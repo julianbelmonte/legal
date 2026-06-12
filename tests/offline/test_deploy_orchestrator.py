@@ -217,3 +217,33 @@ def test_wait_for_dns_returns_on_match(monkeypatch):
 def test_wait_for_dns_times_out_is_nonfatal(monkeypatch):
     monkeypatch.setattr(deploy, "_dns_resolves_to", lambda d, ip: False)
     assert deploy._wait_for_dns("x.example", "1.2.3.4", timeout=0.05, interval=0.01) is False
+
+
+class _FakeSecrets:
+    def __init__(self, extra):
+        self.cloudzy_api_token = None
+        self.extra = extra
+
+
+def test_build_mcp_env_honors_deploy_env_login_secret_over_reuse():
+    # An owner-chosen login secret in the deploy env file wins over a prior
+    # (auto-generated) value recorded in state.
+    env = deploy._build_mcp_env(
+        _FakeSecrets({deploy.MCP_LOGIN_SECRET: "arglegal19"}),
+        domain="mcp.arglegal.live",
+        allowed_email="yoli@arglegal.live",
+        reuse={deploy.MCP_LOGIN_SECRET: "random-from-state"},
+    )
+    assert env[deploy.MCP_LOGIN_SECRET] == "arglegal19"
+
+
+def test_build_mcp_env_reuses_state_when_deploy_env_absent():
+    # When the deploy env file does not set a stable secret, the prior deploy's
+    # value is reused so already-issued tokens stay valid.
+    env = deploy._build_mcp_env(
+        _FakeSecrets({}),
+        domain="mcp.arglegal.live",
+        allowed_email="yoli@arglegal.live",
+        reuse={deploy.MCP_SIGNING_KEY: "stable-signing-key"},
+    )
+    assert env[deploy.MCP_SIGNING_KEY] == "stable-signing-key"
