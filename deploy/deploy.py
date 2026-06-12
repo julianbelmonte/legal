@@ -106,12 +106,14 @@ DEFAULT_SERVICE_USER = "legal"
 DEFAULT_REMOTE_ENV_FILE = str(PurePosixPath(DEFAULT_APP_DIR) / ".env")
 
 #: Default Cloudzy provisioning selectors (overridable on the CLI). These are
-#: validated live IDs from the Cloudzy Developer API: a US-Las-Vegas region, a
+#: validated live IDs from the Cloudzy Developer API: a US-New-York region, a
 #: 4 GB / 2 vCPU default plan (enough headroom for uv sync + BotBrowser vendor),
-#: and the Ubuntu Server 24.04 LTS image. Discover current IDs with
-#: ``python -m deploy.cloudzy_cli regions|products|os``.
-DEFAULT_REGION = "US-Las-Vegas"
-DEFAULT_PRODUCT = "2d798f98-d0e1-4b78-ba5c-663b2212bfb8"
+#: and the Ubuntu Server 24.04 LTS image. Plans go out of sales / out of stock
+#: over time (PRODUCT_IS_OUT_OF_SALES) — rediscover current in-stock IDs with
+#: ``python -m deploy.cloudzy_cli regions`` / ``products`` (products need a
+#: regionId; pick one with ``isOutOfSales: false`` and ``remainingActualStock``).
+DEFAULT_REGION = "US-New-York"
+DEFAULT_PRODUCT = "6a113a85-d6c1-4cf2-97be-93a67538d206"
 DEFAULT_OS = "4700a1df2452ce24d8349625ba8b45d4bd1c54e60ad06ff879bce048935d57ff"
 DEFAULT_HOSTNAME = "legal-agent"
 DEFAULT_SSH_USER = "root"
