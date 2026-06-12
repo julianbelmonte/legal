@@ -59,8 +59,8 @@ ID_DOCUMENTO_RE = re.compile(r"idDocumento=(?P<doc_id>\d+)")
 def add_fallos_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--texto", default="", help="free text to search in fallos")
     parser.add_argument("--partes", help="party-name filter")
-    parser.add_argument("--fecha-desde", dest="fecha_desde", help="lower decision date bound")
-    parser.add_argument("--fecha-hasta", dest="fecha_hasta", help="upper decision date bound")
+    parser.add_argument("--fecha-desde", dest="fecha_desde", help="lower decision date bound, YYYY-MM-DD")
+    parser.add_argument("--fecha-hasta", dest="fecha_hasta", help="upper decision date bound, YYYY-MM-DD")
     parser.add_argument(
         "--terms",
         default="todas",
