@@ -247,6 +247,11 @@ def render_bootstrap_script(
     enable_blocks = "\n".join(
         f"systemctl enable --now {shlex.quote(name)}" for name in units
     )
+    # `enable --now` starts a stopped unit but does NOT restart a running one, so
+    # on a redeploy the app would keep its old in-memory env/code. Restart the
+    # app unit explicitly so a new env file (e.g. an updated public URL) and
+    # freshly synced code take effect every time.
+    restart_app = f"systemctl restart {shlex.quote(f'{app_service_name}.service')}"
 
     return f"""#!/usr/bin/env bash
 # Idempotent bootstrap for a fresh Ubuntu-like Cloudzy VPS hosting the legal
@@ -334,6 +339,7 @@ echo "[bootstrap] installing systemd units"
 
 systemctl daemon-reload
 {enable_blocks}
+{restart_app}
 
 echo "[bootstrap] writing Caddyfile for {domain}"
 mkdir -p /etc/caddy

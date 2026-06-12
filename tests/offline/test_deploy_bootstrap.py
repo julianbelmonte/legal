@@ -49,6 +49,13 @@ def test_render_configures_caddy_for_domain():
     assert "enable --now caddy" in script
 
 
+def test_render_restarts_app_so_redeploys_pick_up_new_env():
+    # `enable --now` won't restart a running unit; a redeploy must restart the
+    # app so an updated env file / synced code takes effect.
+    script = render_bootstrap_script(app_dir="/opt/legal", service_user="legal")
+    assert "systemctl restart legal-api.service" in script
+
+
 def test_render_references_app_dir_and_user():
     script = render_bootstrap_script(app_dir="/srv/app", service_user="webby")
     assert "/srv/app" in script
