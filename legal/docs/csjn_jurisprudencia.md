@@ -53,9 +53,19 @@ legal csjn download --id <idDocumento> --text --save-pdf .work/csjn.pdf --pretty
 `sumarios` flags:
 
 - `--texto`
+- `--tomo` / `--pagina` — Fallos-collection citation search (e.g. `315:2616`
+  → `--tomo 315 --pagina 2616`). These map to the sumarios form's dedicated
+  `filter.tomo` / `filter.pagina` inputs. Citation search lives on the sumarios
+  form only; the fallos consulta form has no collection-citation fields, so
+  cite lookups must go through `sumarios`. A fallo with no indexed sumario
+  returns `ok: true` with zero items (the citation is valid but not sumariado).
 - `--retries`
 - `--show`
 - shared output flags: `--limit`, `--raw`, `--pretty`
+
+```bash
+legal csjn sumarios --tomo 327 --pagina 3753 --limit 5 --pretty
+```
 
 `documento` fetches the document page for a known numeric `idDocumento` and also
 tries to fetch/extract the associated PDF text through the browser context.

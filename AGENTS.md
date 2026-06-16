@@ -227,11 +227,17 @@ Source id: `csjn`. Operations: `fallos`, `sumarios`, `documento`, `download`.
 ```bash
 uv run python -m legal.cli csjn fallos --texto "arbitrariedad" --limit 5 --retries 3 --pretty
 uv run python -m legal.cli csjn sumarios --texto "amparo" --limit 5 --retries 3 --pretty
+uv run python -m legal.cli csjn sumarios --tomo 327 --pagina 3753 --limit 5 --pretty
 uv run python -m legal.cli csjn documento --id <idDocumento> --pretty
 uv run python -m legal.cli csjn download --id <idDocumento> --text --save-pdf .work/csjn.pdf --pretty
 ```
 
 `fallos` and `sumarios` return search `items` when the browser score is accepted.
+Search a Fallos-collection citation (e.g. `315:2616`) via `sumarios --tomo 315
+--pagina 2616`: it maps to the sumarios form's `filter.tomo`/`filter.pagina`
+inputs. Citation search exists only on the sumarios form (the fallos form has no
+collection-citation fields); a valid cite whose fallo has no indexed sumario
+returns `ok: true` with zero items.
 `documento` returns page text plus extracted PDF text when available. `download`
 returns a PDF-backed `document`, optional saved path, and extracted text with
 `--text`.

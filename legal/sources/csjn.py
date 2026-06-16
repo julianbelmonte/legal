@@ -83,6 +83,14 @@ def add_fallos_arguments(parser: argparse.ArgumentParser) -> None:
 def add_sumarios_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--texto", default="", help="free text to search in sumarios")
     parser.add_argument(
+        "--tomo",
+        help="Fallos citation volume, e.g. 315 (for a 'tomo:pagina' cite like 315:2616)",
+    )
+    parser.add_argument(
+        "--pagina",
+        help="Fallos citation page, e.g. 2616 (for a 'tomo:pagina' cite like 315:2616)",
+    )
+    parser.add_argument(
         "--retries",
         type=_positive_int,
         default=DEFAULT_RETRIES,
@@ -599,25 +607,48 @@ def _fill_sumarios_form(page: Any, args: argparse.Namespace, *, pace: int = 0) -
             return el && el.getAttribute('name') ? '[name="'+el.getAttribute('name')+'"]' : null;
         }"""
     )
-    if not selector:
+    if selector:
+        try:
+            page.query_selector(selector).click()
+            page.type(selector, texto, delay=45 if pace else 35)
+        except Exception:
+            page.evaluate(
+                """(query) => {
+                    const el=document.querySelector('[name="filter.fullText"]')
+                           || document.querySelector('[name="texto"]')
+                           || document.querySelector('input[type=text]');
+                    if(el){
+                        el.value=query;
+                        el.dispatchEvent(new Event('input', {bubbles: true}));
+                        el.dispatchEvent(new Event('change', {bubbles: true}));
+                    }
+                }""",
+                texto,
+            )
+
+    # Fallos citation search: the sumarios form exposes dedicated tomo/pagina
+    # inputs ("filter.tomo"/"filter.pagina"), so a cite like 315:2616 resolves
+    # to its sumario(s). The fallos consulta form has no such fields, which is
+    # why citation lookups must go through sumarios.
+    _set_filter_field(page, "filter.tomo", _clean_text(getattr(args, "tomo", None)))
+    _set_filter_field(page, "filter.pagina", _clean_text(getattr(args, "pagina", None)))
+
+
+def _set_filter_field(page: Any, name: str, value: str | None) -> None:
+    """Set a CSJN form text field by name, tolerant of overlay/typing quirks."""
+    if not value:
         return
-    try:
-        page.query_selector(selector).click()
-        page.type(selector, texto, delay=45 if pace else 35)
-    except Exception:
-        page.evaluate(
-            """(query) => {
-                const el=document.querySelector('[name="filter.fullText"]')
-                       || document.querySelector('[name="texto"]')
-                       || document.querySelector('input[type=text]');
-                if(el){
-                    el.value=query;
-                    el.dispatchEvent(new Event('input', {bubbles: true}));
-                    el.dispatchEvent(new Event('change', {bubbles: true}));
-                }
-            }""",
-            texto,
-        )
+    page.evaluate(
+        """([name, value]) => {
+            const el=document.querySelector('[name="'+name+'"]');
+            if(el){
+                el.value=value;
+                el.dispatchEvent(new Event('input', {bubbles: true}));
+                el.dispatchEvent(new Event('change', {bubbles: true}));
+            }
+        }""",
+        [name, value],
+    )
 
 
 def parse_fallos_html(html: str) -> list[JsonDict]:
@@ -971,6 +1002,8 @@ def _sumarios_query_from_args(args: argparse.Namespace) -> JsonDict:
     return _compact(
         {
             "texto": _clean_text(getattr(args, "texto", None)) or "",
+            "tomo": _clean_text(getattr(args, "tomo", None)) or None,
+            "pagina": _clean_text(getattr(args, "pagina", None)) or None,
             "retries": _optional_positive_int(getattr(args, "retries", None)) or DEFAULT_RETRIES,
             "show": bool(getattr(args, "show", False)),
         }
