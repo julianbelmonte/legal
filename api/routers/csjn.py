@@ -54,6 +54,14 @@ class SumariosRequest(BaseModel):
     """Typed body for ``POST /v1/csjn/sumarios`` (CSJN sumarios search)."""
 
     texto: str | None = Field(default=None, description="free text to search in sumarios")
+    tomo: str | None = Field(
+        default=None,
+        description="Fallos citation volume, e.g. 315 (for a 'tomo:pagina' cite like 315:2616)",
+    )
+    pagina: str | None = Field(
+        default=None,
+        description="Fallos citation page, e.g. 2616 (for a 'tomo:pagina' cite like 315:2616)",
+    )
     retries: int | None = Field(
         default=None, description="search attempts; reCAPTCHA Enterprise scoring is probabilistic"
     )

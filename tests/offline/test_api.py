@@ -313,6 +313,29 @@ def test_typed_csjn_fallos(api_client, monkeypatch):
     assert "partes" not in params
 
 
+def test_typed_csjn_sumarios_forwards_citation(api_client, monkeypatch):
+    client, headers = api_client
+    seen: dict[str, Any] = {}
+
+    def _capture(source_id, operation, params=None, **_kwargs):
+        seen["args"] = (source_id, operation, dict(params or {}))
+        return _ok_envelope(source_id, operation)
+
+    monkeypatch.setattr(legal.dispatch, "run_operation", _capture)
+    resp = client.post(
+        "/v1/csjn/sumarios",
+        json={"tomo": "327", "pagina": "3753", "limit": 5},
+        headers=headers,
+    )
+    assert resp.status_code == 200
+    source_id, operation, params = seen["args"]
+    assert (source_id, operation) == ("csjn", "sumarios")
+    # the Fallos-citation fields must reach the pipeline, not be dropped
+    assert params["tomo"] == "327"
+    assert params["pagina"] == "3753"
+    assert "texto" not in params  # exclude_none drops unset fields
+
+
 def test_typed_saij_search(api_client, monkeypatch):
     client, headers = api_client
     seen: dict[str, Any] = {}
