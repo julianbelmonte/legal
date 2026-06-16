@@ -155,6 +155,17 @@ def vendor_botbrowser(src: Path, *, dry_run: bool) -> str:
 
 def vendor_profiles(src: Path, *, dry_run: bool) -> tuple[int, int]:
     if not src.is_dir():
+        # The deploy rsyncs an already-vendored ``legal/vendor`` onto the VPS,
+        # where the original source tree (the drone profiles dir) does not exist.
+        # If profiles are already present at the destination, that is success,
+        # not a failure: skip instead of aborting the bootstrap.
+        existing = sorted(PROFILES_DEST.glob("*.enc")) if PROFILES_DEST.is_dir() else []
+        if existing:
+            print(
+                f"profiles: already present at {PROFILES_DEST} "
+                f"({len(existing)} profiles); source {src} absent, skipping"
+            )
+            return (0, len(existing))
         raise FileNotFoundError(
             f"BotBrowser profiles source directory not found: {src}. "
             "Set LEGAL_PROFILES_SRC."

@@ -325,13 +325,42 @@ if [ -f "$APP_DIR/pyproject.toml" ]; then
 fi
 
 echo "[bootstrap] vendoring BotBrowser profiles via legal/scripts/bootstrap.py"
-# BotBrowser assets (and the drone profiles tree) are absent on a clean VPS, so
-# this step is best-effort: the browser/captcha sources will be unavailable, but
-# the API + MCP server (and the non-browser tools the smoke exercises) run fine.
-# Do not let a missing BotBrowser source abort the deploy.
+# The orchestrator rsyncs the locally vendored legal/vendor (BotBrowser binary +
+# .enc profiles) onto the box, so the assets are already present here; the vendor
+# script just confirms them (the original drone source tree does not exist on the
+# VPS, and the script now skips gracefully when the destination is populated).
 if [ -f {q_vendor_script} ]; then
   ( cd "$APP_DIR" && sudo -u "$SERVICE_USER" --preserve-env=HOME env HOME="$(getent passwd "$SERVICE_USER" | cut -d: -f6)" /usr/local/bin/uv run python {q_vendor_script} ) \
-    || echo "[bootstrap] BotBrowser vendoring skipped (assets unavailable on this host)"
+    || echo "[bootstrap] BotBrowser vendoring step reported missing source (assets may already be present)"
+fi
+
+# Chromium's setuid sandbox must be owned root:root with mode 4755. The repo
+# sync + 'chown -R $SERVICE_USER' above leaves it owned by the service user, and
+# a fresh Ubuntu VPS commonly restricts unprivileged user namespaces, so without
+# this the browser cannot launch (every browser-backed source would be down).
+SANDBOX="$APP_DIR/legal/vendor/botbrowser/chrome-sandbox"
+if [ -f "$SANDBOX" ]; then
+  chown root:root "$SANDBOX"
+  chmod 4755 "$SANDBOX"
+  echo "[bootstrap] chrome-sandbox set setuid-root"
+fi
+
+echo "[bootstrap] verifying BotBrowser launch (gates browser-backed sources)"
+# The CSJN/PTN/PJN/SCBA sources are browser-backed; a deploy that cannot launch
+# the browser silently ships a half-dead connector (the failure the smoke test
+# missed). Launch the real browser against about:blank: this exercises the
+# vendored binary, the sandbox, Xvfb, and profile loading without any network or
+# captcha variance. Fail the deploy loudly if it does not come up.
+if [ "${{LEGAL_DEPLOY_SKIP_BROWSER_CHECK:-0}}" = "1" ]; then
+  echo "[bootstrap] browser launch check skipped (LEGAL_DEPLOY_SKIP_BROWSER_CHECK=1)"
+elif ( cd "$APP_DIR" && sudo -u "$SERVICE_USER" --preserve-env=HOME env HOME="$(getent passwd "$SERVICE_USER" | cut -d: -f6)" /usr/local/bin/uv run python -c 'from legal.browser import BotBrowser
+with BotBrowser(hidden=True) as b:
+    b.page.goto("about:blank")
+print("BROWSER_OK")' ); then
+  echo "[bootstrap] browser launch OK (browser-backed sources available)"
+else
+  echo "[bootstrap] ERROR: BotBrowser failed to launch; browser-backed sources (CSJN/PTN/PJN/SCBA) would be down. Aborting deploy." >&2
+  exit 1
 fi
 
 echo "[bootstrap] installing systemd units"

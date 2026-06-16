@@ -425,8 +425,6 @@ def _sync_repo(ip: str, *, user: str, app_dir: str, key_path: str | None) -> Non
         ".venv",
         "--exclude",
         ".work",
-        "--exclude",
-        "legal/vendor",
         "-e",
         ssh_cmd,
         f"{repo_root}/",

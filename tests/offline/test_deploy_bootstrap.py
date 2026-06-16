@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import pytest
 
+import deploy.deploy as deploy_mod
 from deploy.bootstrap import (
     DEFAULT_APP_PORT,
     VENDOR_BOOTSTRAP_REL,
@@ -54,6 +55,50 @@ def test_render_restarts_app_so_redeploys_pick_up_new_env():
     # app so an updated env file / synced code takes effect.
     script = render_bootstrap_script(app_dir="/opt/legal", service_user="legal")
     assert "systemctl restart legal-api.service" in script
+
+
+def test_sync_repo_does_not_exclude_legal_vendor(monkeypatch):
+    # legal/vendor holds the BotBrowser binary + .enc profiles; excluding it from
+    # the rsync left the VPS with no browser, so CSJN/PTN/PJN/SCBA were dead while
+    # direct sources (SAIJ) worked. The sync must carry vendor onto the box.
+    captured: dict[str, list[str]] = {}
+
+    class _Result:
+        returncode = 0
+        stderr = ""
+
+    def _fake_run(cmd, *args, **kwargs):
+        captured["cmd"] = cmd
+        return _Result()
+
+    monkeypatch.setattr(deploy_mod.subprocess, "run", _fake_run)
+    deploy_mod._sync_repo("1.2.3.4", user="legal", app_dir="/opt/legal", key_path=None)
+
+    cmd = captured["cmd"]
+    excludes = [cmd[i + 1] for i, tok in enumerate(cmd) if tok == "--exclude"]
+    assert "legal/vendor" not in excludes
+    assert ".git" in excludes  # other excludes still intact
+
+
+def test_render_sets_chrome_sandbox_setuid_root():
+    # Chromium's setuid sandbox must be root:root 4755 or the browser cannot
+    # launch on a VPS that restricts unprivileged user namespaces, taking every
+    # browser-backed source (CSJN/PTN/PJN/SCBA) down.
+    script = render_bootstrap_script(app_dir="/opt/legal", service_user="legal")
+    assert "$APP_DIR/legal/vendor/botbrowser/chrome-sandbox" in script
+    assert "chmod 4755" in script
+    assert "chown root:root" in script
+
+
+def test_render_gates_deploy_on_browser_launch():
+    # The deploy must fail loudly when the browser cannot launch instead of
+    # silently shipping a half-dead connector (the failure the smoke missed).
+    script = render_bootstrap_script(app_dir="/opt/legal", service_user="legal")
+    assert "from legal.browser import BotBrowser" in script
+    assert "Aborting deploy" in script
+    assert "exit 1" in script
+    # but allow an explicit opt-out for API-only deploys
+    assert "LEGAL_DEPLOY_SKIP_BROWSER_CHECK" in script
 
 
 def test_render_references_app_dir_and_user():
